@@ -12,7 +12,6 @@ import (
 )
 
 func TestHTTPControlPlaneResolver_AuthenticatePassword(t *testing.T) {
-	// 1. Mock Control Plane Server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload authRequestPayload
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -37,7 +36,7 @@ func TestHTTPControlPlaneResolver_AuthenticatePassword(t *testing.T) {
 
 	resolver := NewHTTPControlPlaneResolver(server.URL)
 
-	// 2. Test Success
+	// Test Success
 	perms, ok := resolver.AuthenticatePassword("valid_user", "valid_pass")
 	if !ok || perms == nil {
 		t.Fatalf("Expected successful password authentication")
@@ -46,7 +45,7 @@ func TestHTTPControlPlaneResolver_AuthenticatePassword(t *testing.T) {
 		t.Errorf("Expected prefix pattern tenants/valid_user/, got %s", perms.S3PrefixPattern)
 	}
 
-	// 3. Test Failure
+	// Test Failure
 	_, ok = resolver.AuthenticatePassword("valid_user", "wrong_pass")
 	if ok {
 		t.Errorf("Expected failed authentication for wrong password")
