@@ -1,17 +1,29 @@
 server:
   port: 2222
   host_key_path: "./keys/host_rsa"
+  trusted_ca_path: "./keys/trusted_ca.pub"
+
+rabbitmq:
+  enabled: true
+  url: "amqp://guest:guest@rabbitmq:5672/"
+  queue_name: "hook22_webhooks"
 
 storage:
-  driver: "gcs"
-  gcs:
-    bucket: "hook22-testing-bucket"
-    credentials_file: "./keys/gcp-creds.json"
+  driver: "s3"
+  s3:
+    bucket: "my-sftp-drops"
+    region: "us-east-1"
+    endpoint: "http://minio:9000"
+    access_key: "minioadmin"
+    secret_key: "minioadmin"
 
 webhook:
-  url: "http://localhost:3000/post"
+  url: "http://webhook-receiver:80/post"
   secret: "whsec_e2e_secret_999"
+  workers: 5
+  max_retries: 5
+  base_backoff: 2
 
 users:
-  - username: "gcp_test_user"
-    password: "gcp_test_password"
+  - username: "e2e_user"
+    password: "e2e_password"

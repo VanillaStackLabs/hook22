@@ -15,6 +15,24 @@ services:
     depends_on:
       create-bucket:
         condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+
+  # Persistent Message Broker
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-broker
+    ports:
+      - "5672:5672"   # AMQP Protocol
+      - "15672:15672" # Web Management Dashboard
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Local S3 Emulator (Chainguard MinIO)
   minio:

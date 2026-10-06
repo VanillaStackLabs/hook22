@@ -41,6 +41,12 @@ type Config struct {
 		PrivateKeyPath string `yaml:"private_key_path"`
 		Passphrase     string `yaml:"passphrase"`
 	} `yaml:"pgp"`
+	
+	RabbitMQ struct {
+		URL       string `yaml:"url"`        // e.g. "amqp://guest:guest@localhost:5672/"
+		QueueName string `yaml:"queue_name"` // e.g. "hook22_webhooks"
+		Enabled   bool   `yaml:"enabled"`
+	} `yaml:"rabbitmq"`
 
 	Webhook struct {
 		URL         string `yaml:"url"`

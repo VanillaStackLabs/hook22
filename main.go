@@ -12,41 +12,33 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-func initStorageProvider(ctx context.Context, cfg *Config) StorageProvider {
+func initStorageProvider(ctx context.Context, cfg *Config) (StorageProvider, error) {
 	switch cfg.Storage.Driver {
 	case "s3":
 		provider, err := NewS3Provider(ctx, cfg)
 		if err != nil {
-			slog.Error("S3 initialization failed (halting boot)", "error", err.Error())
-			os.Exit(1)
-			return nil
+			return nil, fmt.Errorf("S3 initialization failed: %w", err)
 		}
-		return provider
+		return provider, nil
 	case "gcs":
 		provider, err := NewGCSProvider(ctx, cfg)
 		if err != nil {
-			slog.Error("GCS initialization failed (halting boot)", "error", err.Error())
-			os.Exit(1)
-			return nil
+			return nil, fmt.Errorf("GCS initialization failed: %w", err)
 		}
-		return provider
+		return provider, nil
 	case "azure":
 		provider, err := NewAzureProvider(cfg)
 		if err != nil {
-			slog.Error("Azure initialization failed (halting boot)", "error", err.Error())
-			os.Exit(1)
-			return nil
+			return nil, fmt.Errorf("Azure initialization failed: %w", err)
 		}
-		return provider
+		return provider, nil
 	case "disk":
-		return NewDiskProvider(cfg)
+		return NewDiskProvider(cfg), nil
 	case "mock":
 		slog.Warn("Using mock in-memory storage provider. DATA WILL BE DISCARDED.", "event", "storage.mock_warning")
-		return &MockStorageProvider{}
+		return &MockStorageProvider{}, nil
 	default:
-		slog.Error("Unknown storage driver specified in config", "driver", cfg.Storage.Driver)
-		os.Exit(1)
-		return nil
+		return nil, fmt.Errorf("unknown storage driver specified in config: %s", cfg.Storage.Driver)
 	}
 }
 
@@ -66,8 +58,12 @@ func main() {
 	}
 
 	InitWebhookDispatcher(cfg)
-	storageBackend := initStorageProvider(context.Background(), cfg)
-
+	storageBackend, err := initStorageProvider(context.Background(), cfg)
+	if err != nil {
+		slog.Error("Storage initialization failed", "error", err.Error())
+		os.Exit(1)
+	}
+	
 	// Register outbound push endpoint
 	http.HandleFunc("/api/v1/sftp/push", handleOutboundPush(storageBackend))
 

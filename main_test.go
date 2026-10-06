@@ -10,7 +10,10 @@ func TestInitStorageProvider_MockDriver(t *testing.T) {
 	cfg := &Config{}
 	cfg.Storage.Driver = "mock"
 
-	provider := initStorageProvider(context.Background(), cfg)
+	provider, err := initStorageProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error for mock driver: %v", err)
+	}
 	if _, ok := provider.(*MockStorageProvider); !ok {
 		t.Errorf("Expected MockStorageProvider, got %T", provider)
 	}
@@ -21,7 +24,10 @@ func TestInitStorageProvider_S3Driver(t *testing.T) {
 	cfg.Storage.Driver = "s3"
 	cfg.Storage.S3.Region = "us-east-1"
 
-	provider := initStorageProvider(context.Background(), cfg)
+	provider, err := initStorageProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error for S3 driver: %v", err)
+	}
 	if _, ok := provider.(*S3Provider); !ok {
 		t.Errorf("Expected S3Provider, got %T", provider)
 	}
@@ -31,9 +37,12 @@ func TestInitStorageProvider_DefaultFallback(t *testing.T) {
 	cfg := &Config{}
 	cfg.Storage.Driver = "unknown_driver"
 
-	provider := initStorageProvider(context.Background(), cfg)
-	if _, ok := provider.(*MockStorageProvider); !ok {
-		t.Errorf("Expected default fallback to MockStorageProvider, got %T", provider)
+	provider, err := initStorageProvider(context.Background(), cfg)
+	if err == nil {
+		t.Errorf("Expected error for unknown_driver, got nil")
+	}
+	if provider != nil {
+		t.Errorf("Expected nil provider for unknown_driver, got %T", provider)
 	}
 }
 
