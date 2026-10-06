@@ -10,15 +10,18 @@ RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o sftp-webhook-gateway .
 
-# Distroless Runtime
-FROM gcr.io/distroless/static-debian12
+# Alpine Runtime
+FROM alpine:latest
+
+# Add root certificates for HTTPS (Webhooks, S3, GCS, Azure)
+RUN apk --no-cache add ca-certificates
 
 WORKDIR /
 
 # Copy executable from builder
 COPY --from=builder /app/sftp-webhook-gateway /sftp-webhook-gateway
 
-# Expose SFTP port (2222) and SSE Log API port (8080)
+# Expose SFTP port (2222) and SSE Log/Metrics API port (8080)
 EXPOSE 2222 8080
 
 ENTRYPOINT ["/sftp-webhook-gateway"]

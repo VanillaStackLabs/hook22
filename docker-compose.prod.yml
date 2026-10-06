@@ -10,10 +10,17 @@ services:
     restart: unless-stopped
     ports:
       - "2222:2222" # SFTP Protocol
-      - "8080:8080" # SSE Log Stream & API
+      - "8080:8080" # SSE Log Stream & Prometheus Metrics API
     volumes:
       - ./config.yaml:/config.yaml:ro
       - ./keys:/keys:ro
+      
+      # Uncomment if using Google Cloud Storage (GCS) driver:
+      # - ./gcp-creds.json:/gcp-creds.json:ro
+      
+      # Uncomment if using Local Disk driver (ensure base_path: "/data" is set in config.yaml):
+      # - ./data:/data
+      
     logging:
       driver: "json-file"
       options:

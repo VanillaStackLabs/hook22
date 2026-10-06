@@ -9,10 +9,12 @@ services:
     container_name: sftp-gateway
     ports:
       - "2222:2222" # SFTP Protocol
-      - "8080:8080" # Real-Time SSE Log API
+      - "8080:8080" # Real-Time SSE Log & Metrics API
     volumes:
       - ./config.yaml:/config.yaml
       - ./keys:/keys
+      - ./data:/data # Local disk testing volume
+      # - ./gcp-creds.json:/gcp-creds.json:ro
     depends_on:
       minio:
         condition: service_healthy
