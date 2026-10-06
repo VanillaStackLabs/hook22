@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -58,14 +57,6 @@ func TestE2E_FullPipeline(t *testing.T) {
 
 	// Initialize the worker pool for async test event processing
 	InitWebhookDispatcher(cfg)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("Failed to bind TCP listener: %v", err)
-	}
-	defer listener.Close()
-
-	serverAddr := listener.Addr().String()
 	storageBackend := &MockStorageProvider{}
 
 	sshConfig := &ssh.ServerConfig{
@@ -86,15 +77,19 @@ func TestE2E_FullPipeline(t *testing.T) {
 	}
 	sshConfig.AddHostKey(private)
 
+	// Replace raw listener with the new GatewayServer
+	server := NewGatewayServer(cfg, sshConfig, storageBackend)
 	go func() {
-		for {
-			conn, err := listener.Accept()
-			if err != nil {
-				return
-			}
-			go handleConnection(conn, sshConfig, cfg, storageBackend)
-		}
+		_ = server.Start("127.0.0.1:0") // Bind to an ephemeral port
 	}()
+
+	// Give the server a fraction of a second to bind the listener
+	time.Sleep(100 * time.Millisecond)
+	if server.listener == nil {
+		t.Fatalf("Server failed to bind listener")
+	}
+	serverAddr := server.listener.Addr().String()
+	defer server.Shutdown() // Test graceful shutdown upon completion
 
 	clientConfig := &ssh.ClientConfig{
 		User: "e2e_user",

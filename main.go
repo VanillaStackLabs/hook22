@@ -3,15 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
-	"net"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/pkg/sftp"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"golang.org/x/crypto/ssh"
 )
 
 func initStorageProvider(ctx context.Context, cfg *Config) StorageProvider {
@@ -50,7 +48,6 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(broadcaster, nil))
 	slog.SetDefault(logger)
 
-	// Register Prometheus metrics endpoint
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/api/v1/logs/stream", handleLogStream(broadcaster))
 	go http.ListenAndServe(":8080", nil)
@@ -70,92 +67,41 @@ func main() {
 		os.Exit(1)
 	}
 
-	listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port)
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		slog.Error("Failed to start TCP listener", "event", "server.listen_error", "addr", listenAddr, "error", err.Error())
-		os.Exit(1)
-	}
+	// Start Server Goroutine
+	server := NewGatewayServer(cfg, sshConfig, storageBackend)
 
-	slog.Info("Hook22 SFTP Gateway started", "event", "server.started", "addr", listenAddr)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			slog.Warn("Failed to accept TCP connection", "event", "server.accept_error", "error", err.Error())
-			continue
+	go func() {
+		listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port)
+		if err := server.Start(listenAddr); err != nil {
+			slog.Error("Server failed to start", "event", "server.start_error", "error", err.Error())
+			os.Exit(1)
 		}
-		go handleConnection(conn, sshConfig, cfg, storageBackend)
+	}()
+
+	// Block on OS Signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	slog.Info("Graceful shutdown initiated...", "event", "server.shutdown_start")
+
+	server.Shutdown()
+
+	if globalDispatcher != nil {
+		slog.Info("Draining webhook delivery queue...", "event", "server.shutdown_webhooks")
+		globalDispatcher.Shutdown()
 	}
-}
 
-func handleConnection(conn net.Conn, sshConfig *ssh.ServerConfig, cfg *Config, storage StorageProvider) {
-	sshConn, chans, reqs, err := ssh.NewServerConn(conn, sshConfig)
-	if err != nil {
-		slog.Warn("SSH handshake failed", "event", "ssh.handshake_failed", "remote_addr", conn.RemoteAddr().String(), "error", err.Error())
-		return
-	}
-
-	// Increment Gauge on auth success, decrement on disconnect
-	ActiveSSHSessions.Inc()
-	defer ActiveSSHSessions.Dec()
-	defer sshConn.Close()
-
-	slog.Info("Client authenticated", "event", "ssh.auth_success", "username", sshConn.User(), "remote_addr", conn.RemoteAddr().String())
-
-	go ssh.DiscardRequests(reqs)
-
-	for newChannel := range chans {
-		if newChannel.ChannelType() != "session" {
-			newChannel.Reject(ssh.UnknownChannelType, "unknown channel type")
-			continue
-		}
-		channel, requests, err := newChannel.Accept()
-		if err != nil {
-			slog.Warn("Could not accept SSH channel", "event", "ssh.channel_error", "error", err.Error())
-			continue
-		}
-
-		go func(ch ssh.Channel, in <-chan *ssh.Request) {
-			defer ch.Close()
-
-			for req := range in {
-				if req.Type == "subsystem" && string(req.Payload[4:]) == "sftp" {
-					req.Reply(true, nil)
-
-					handler := &gatewayHandler{
-						storage:  storage,
-						cfg:      cfg,
-						username: sshConn.User(),
-					}
-
-					handlers := sftp.Handlers{
-						FilePut:  handler,
-						FileGet:  handler,
-						FileCmd:  handler,
-						FileList: handler,
-					}
-
-					server := sftp.NewRequestServer(ch, handlers)
-					if err := server.Serve(); err != nil && err != io.EOF {
-						slog.Error("SFTP server error", "event", "sftp.server_error", "username", sshConn.User(), "error", err.Error())
-					}
-					return
-				}
-				req.Reply(false, nil)
-			}
-		}(channel, requests)
-	}
+	slog.Info("Graceful shutdown complete. Exiting.", "event", "server.shutdown_complete")
 }
 
 func handleLogStream(broadcaster *LogBroadcaster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Set headers required for Server-Sent Events
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
 		w.Header().Set("Connection", "keep-alive")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.WriteHeader(http.StatusOK) // Flush headers immediately for SSE connections
+		w.WriteHeader(http.StatusOK)
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
@@ -166,7 +112,6 @@ func handleLogStream(broadcaster *LogBroadcaster) http.HandlerFunc {
 		clientChan := broadcaster.Subscribe()
 		defer broadcaster.Unsubscribe(clientChan)
 
-		// Stream logs until client closes the browser tab
 		for {
 			select {
 			case <-r.Context().Done():

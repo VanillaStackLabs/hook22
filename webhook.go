@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/rand"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -34,6 +35,7 @@ type WebhookDispatcher struct {
 	client    *http.Client
 	taskQueue chan WebhookTask
 	rng       *rand.Rand
+	wg        sync.WaitGroup
 }
 
 var globalDispatcher *WebhookDispatcher
@@ -47,6 +49,7 @@ func InitWebhookDispatcher(cfg *Config) {
 	}
 
 	for i := 0; i < cfg.Webhook.Workers; i++ {
+		dispatcher.wg.Add(1)
 		go dispatcher.worker(i + 1)
 	}
 
@@ -75,7 +78,7 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 			slog.Info("Enqueued webhook delivery task", "event", "webhook.enqueue", "filepath", filepath)
 		default:
 			slog.Error("Webhook queue full, dropping event", "event", "webhook.queue_overflow", "filepath", filepath)
-			WebhookDeliveriesTotal.WithLabelValues("dropped_queue_full").Inc() // Track dropped events
+			WebhookDeliveriesTotal.WithLabelValues("dropped_queue_full").Inc()
 		}
 	} else {
 		dispatchWithRetry(task, cfg, &http.Client{Timeout: 10 * time.Second})
@@ -83,6 +86,7 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 }
 
 func (d *WebhookDispatcher) worker(id int) {
+	defer d.wg.Done()
 	for task := range d.taskQueue {
 		d.processTask(task)
 	}
@@ -90,6 +94,11 @@ func (d *WebhookDispatcher) worker(id int) {
 
 func (d *WebhookDispatcher) processTask(task WebhookTask) {
 	dispatchWithRetry(task, d.cfg, d.client)
+}
+
+func (d *WebhookDispatcher) Shutdown() {
+	close(d.taskQueue)
+	d.wg.Wait()
 }
 
 func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) {
