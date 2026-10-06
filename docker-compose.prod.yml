@@ -1,0 +1,27 @@
+version: "3.8"
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: sftp-webhook-gateway:latest
+    container_name: sftp-webhook-gateway
+    restart: unless-stopped
+    ports:
+      - "2222:2222" # SFTP Protocol
+      - "8080:8080" # SSE Log Stream & API
+    volumes:
+      - ./config.yaml:/config.yaml:ro
+      - ./keys:/keys:ro
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "2222"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

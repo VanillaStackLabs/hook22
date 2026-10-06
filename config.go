@@ -8,8 +8,9 @@ import (
 
 type Config struct {
 	Server struct {
-		Port        int    `yaml:"port"`
-		HostKeyPath string `yaml:"host_key_path"`
+		Port          int    `yaml:"port"`
+		HostKeyPath   string `yaml:"host_key_path"`
+		TrustedCAPath string `yaml:"trusted_ca_path"`
 	} `yaml:"server"`
 
 	Storage struct {
@@ -24,13 +25,17 @@ type Config struct {
 	} `yaml:"storage"`
 
 	Webhook struct {
-		URL    string `yaml:"url"`
-		Secret string `yaml:"secret"`
+		URL         string `yaml:"url"`
+		Secret      string `yaml:"secret"`
+		Workers     int    `yaml:"workers"`
+		MaxRetries  int    `yaml:"max_retries"`
+		BaseBackoff int    `yaml:"base_backoff"`
 	} `yaml:"webhook"`
 
 	Users []struct {
-		Username string `yaml:"username"`
-		Password string `yaml:"password"`
+		Username   string   `yaml:"username"`
+		Password   string   `yaml:"password"`
+		PublicKeys []string `yaml:"public_keys"`
 	} `yaml:"users"`
 }
 
@@ -42,6 +47,15 @@ func loadConfig(path string) (*Config, error) {
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
+	}
+	if cfg.Webhook.Workers == 0 {
+		cfg.Webhook.Workers = 5
+	}
+	if cfg.Webhook.MaxRetries == 0 {
+		cfg.Webhook.MaxRetries = 5
+	}
+	if cfg.Webhook.BaseBackoff == 0 {
+		cfg.Webhook.BaseBackoff = 2
 	}
 	return &cfg, nil
 }
