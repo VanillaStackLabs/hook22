@@ -1,0 +1,56 @@
+version: "3.8"
+
+services:
+  # SFTP Webhook Gateway
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sftp-gateway
+    ports:
+      - "2222:2222" # SFTP Protocol
+      - "8080:8080" # Real-Time SSE Log API
+    volumes:
+      - ./config.yaml:/config.yaml
+      - ./keys:/keys
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  # Local S3 Emulator (MinIO)
+  minio:
+    image: minio/minio:RELEASE.2024-01-31T20-20-31Z
+    container_name: minio-s3
+    ports:
+      - "9000:9000" # S3 API Endpoint
+      - "9001:9001" # Web Console UI
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 2s
+      retries: 5
+
+  # Automatically Create S3 Bucket in MinIO
+  create-bucket:
+    image: minio/mc:latest
+    container_name: minio-bucket-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      /usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin;
+      /usr/bin/mc mb myminio/my-sftp-drops --ignore-existing;
+      exit 0;
+      "
+
+  # Local Webhook Receiver
+  webhook-echo:
+    image: ealen/echo-server:latest
+    container_name: webhook-receiver
+    ports:
+      - "3000:80"
