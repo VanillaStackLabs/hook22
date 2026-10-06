@@ -1,0 +1,41 @@
+# Executables & Binaries
+/sftp-webhook-gateway
+/sftp-webhook-gateway.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Ignore test upload files
+*.csv
+*.tmp
+*.log
+*.txt
+
+# Ignore SSH Host Keys & SSL Certificates (Keep the keys/ folder structure)
+keys/*
+!keys/.gitkeep
+id_rsa*
+host_rsa*
+host_key*
+*.pem
+*.key
+
+# Local Environment & Override Configs
+.env
+.env.local
+config.local.yaml
+
+# IDE & OS Specific Files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Dependency / Go Vendor Folders
+vendor/
