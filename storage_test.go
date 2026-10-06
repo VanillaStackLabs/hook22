@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -11,7 +13,6 @@ func TestMockStorageProvider_Upload(t *testing.T) {
 	data := []byte("hello world sftp stream")
 	reader := bytes.NewReader(data)
 
-	// SHA-256 of "hello world sftp stream"
 	expectedHash := "06150febbe4805e0fe816098df1c0ab6cd3cf9f4a2d617f55c8c4722f5386d10"
 	expectedSize := int64(len(data))
 
@@ -25,6 +26,40 @@ func TestMockStorageProvider_Upload(t *testing.T) {
 	}
 	if hash != expectedHash {
 		t.Errorf("Expected hash %s, got %s", expectedHash, hash)
+	}
+}
+
+func TestDiskStorageProvider_Upload(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &Config{}
+	cfg.Storage.Disk.BasePath = tmpDir
+
+	provider := NewDiskProvider(cfg)
+	data := []byte("disk storage test data")
+	reader := bytes.NewReader(data)
+
+	expectedSize := int64(len(data))
+	expectedHash := "65464c2fa948a6af0b6b8308445f65354c78c3521cdc646dcee81cb4ace25b19"
+
+	hash, size, err := provider.Upload(context.Background(), "/out/test.txt", reader)
+	if err != nil {
+		t.Fatalf("Upload failed: %v", err)
+	}
+
+	if size != expectedSize {
+		t.Errorf("Expected size %d, got %d", expectedSize, size)
+	}
+	if hash != expectedHash {
+		t.Errorf("Expected hash %s, got %s", expectedHash, hash)
+	}
+
+	fullPath := filepath.Join(tmpDir, "/out/test.txt")
+	savedData, err := os.ReadFile(fullPath)
+	if err != nil {
+		t.Fatalf("Failed to read saved file: %v", err)
+	}
+	if !bytes.Equal(savedData, data) {
+		t.Errorf("Saved data mismatch. Got %s", string(savedData))
 	}
 }
 

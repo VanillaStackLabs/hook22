@@ -75,9 +75,9 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 			slog.Info("Enqueued webhook delivery task", "event", "webhook.enqueue", "filepath", filepath)
 		default:
 			slog.Error("Webhook queue full, dropping event", "event", "webhook.queue_overflow", "filepath", filepath)
+			WebhookDeliveriesTotal.WithLabelValues("dropped_queue_full").Inc() // Track dropped events
 		}
 	} else {
-		// Fallback for tests or non-initialized pool execution
 		dispatchWithRetry(task, cfg, &http.Client{Timeout: 10 * time.Second})
 	}
 }
@@ -131,6 +131,7 @@ func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) {
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			resp.Body.Close()
 			slog.Info("Webhook delivered successfully", "event", "webhook.delivered", "filepath", task.Payload.Filepath, "status_code", resp.StatusCode)
+			WebhookDeliveriesTotal.WithLabelValues("success").Inc()
 			return
 		}
 
@@ -143,12 +144,12 @@ func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) {
 
 		if task.Attempts >= maxRetries {
 			slog.Error("Webhook delivery exhausted max retries, dropping event", "event", "webhook.exhausted", "filepath", task.Payload.Filepath, "total_attempts", task.Attempts)
+			WebhookDeliveriesTotal.WithLabelValues("failure").Inc()
 			return
 		}
 
-		// Calculate Exponential Backoff with Full Jitter: Sleep = random(0, min(Cap, Base * 2^attempt))
 		tempBackoff := float64(baseBackoff) * math.Pow(2, float64(task.Attempts-1))
-		maxSleep := math.Min(300.0, tempBackoff) // 5 minute max cap
+		maxSleep := math.Min(300.0, tempBackoff)
 		jitterSleep := time.Duration(rand.Float64() * maxSleep * float64(time.Second))
 
 		slog.Info("Scheduling webhook retry", "event", "webhook.retry_scheduled", "filepath", task.Payload.Filepath, "backoff", jitterSleep.String())

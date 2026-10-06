@@ -22,6 +22,18 @@ type Config struct {
 			AccessKey string `yaml:"access_key"`
 			SecretKey string `yaml:"secret_key"`
 		} `yaml:"s3"`
+		GCS struct {
+			Bucket          string `yaml:"bucket"`
+			CredentialsFile string `yaml:"credentials_file"`
+		} `yaml:"gcs"`
+		Azure struct {
+			Container   string `yaml:"container"`
+			AccountName string `yaml:"account_name"`
+			AccountKey  string `yaml:"account_key"`
+		} `yaml:"azure"`
+		Disk struct {
+			BasePath string `yaml:"base_path"`
+		} `yaml:"disk"`
 	} `yaml:"storage"`
 
 	Webhook struct {

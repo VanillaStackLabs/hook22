@@ -10,6 +10,7 @@ import (
 	"os"
 
 	"github.com/pkg/sftp"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -18,28 +19,39 @@ func initStorageProvider(ctx context.Context, cfg *Config) StorageProvider {
 	case "s3":
 		provider, err := NewS3Provider(ctx, cfg)
 		if err != nil {
-			slog.Error("S3 initialization failed, falling back to mock storage",
-				"event", "storage.init_failure",
-				"driver", cfg.Storage.Driver,
-				"error", err.Error(),
-			)
+			slog.Error("S3 initialization failed", "error", err.Error())
 			return &MockStorageProvider{}
 		}
-		slog.Info("Successfully initialized S3 storage provider", "event", "storage.init_success", "bucket", cfg.Storage.S3.Bucket)
 		return provider
-
+	case "gcs":
+		provider, err := NewGCSProvider(ctx, cfg)
+		if err != nil {
+			slog.Error("GCS initialization failed", "error", err.Error())
+			return &MockStorageProvider{}
+		}
+		return provider
+	case "azure":
+		provider, err := NewAzureProvider(cfg)
+		if err != nil {
+			slog.Error("Azure initialization failed", "error", err.Error())
+			return &MockStorageProvider{}
+		}
+		return provider
+	case "disk":
+		return NewDiskProvider(cfg)
 	default:
-		slog.Info("Using mock in-memory storage provider", "event", "storage.init_mock", "driver", cfg.Storage.Driver)
+		slog.Info("Using mock in-memory storage provider", "driver", cfg.Storage.Driver)
 		return &MockStorageProvider{}
 	}
 }
 
 func main() {
-	// Init broadcaster
 	broadcaster := NewLogBroadcaster()
 	logger := slog.New(slog.NewJSONHandler(broadcaster, nil))
 	slog.SetDefault(logger)
 
+	// Register Prometheus metrics endpoint
+	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/api/v1/logs/stream", handleLogStream(broadcaster))
 	go http.ListenAndServe(":8080", nil)
 
@@ -49,7 +61,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Init subsystems
 	InitWebhookDispatcher(cfg)
 	storageBackend := initStorageProvider(context.Background(), cfg)
 
@@ -59,7 +70,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start TCP listener
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -85,6 +95,10 @@ func handleConnection(conn net.Conn, sshConfig *ssh.ServerConfig, cfg *Config, s
 		slog.Warn("SSH handshake failed", "event", "ssh.handshake_failed", "remote_addr", conn.RemoteAddr().String(), "error", err.Error())
 		return
 	}
+
+	// Increment Gauge on auth success, decrement on disconnect
+	ActiveSSHSessions.Inc()
+	defer ActiveSSHSessions.Dec()
 	defer sshConn.Close()
 
 	slog.Info("Client authenticated", "event", "ssh.auth_success", "username", sshConn.User(), "remote_addr", conn.RemoteAddr().String())

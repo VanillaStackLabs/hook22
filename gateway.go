@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/pkg/sftp"
 )
@@ -79,7 +80,17 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 	doneChan := make(chan uploadResult, 1)
 
 	go func() {
+		startTime := time.Now()
 		hash, sizeBytes, err := h.storage.Upload(context.Background(), req.Filepath, pipeR)
+
+		// Record Latency
+		UploadDuration.Observe(time.Since(startTime).Seconds())
+
+		// Record Bytes if successful
+		if err == nil {
+			UploadBytesTotal.Add(float64(sizeBytes))
+		}
+
 		doneChan <- uploadResult{
 			hash:      hash,
 			sizeBytes: sizeBytes,
