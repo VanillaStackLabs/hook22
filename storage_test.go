@@ -3,12 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestMockStorageProvider_Upload(t *testing.T) {
+func TestMockStorageProvider_UploadAndDownload(t *testing.T) {
 	provider := &MockStorageProvider{}
 	data := []byte("hello world sftp stream")
 	reader := bytes.NewReader(data)
@@ -27,9 +28,23 @@ func TestMockStorageProvider_Upload(t *testing.T) {
 	if hash != expectedHash {
 		t.Errorf("Expected hash %s, got %s", expectedHash, hash)
 	}
+
+	rc, err := provider.Download(context.Background(), "/drops/test.txt")
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
+	}
+	defer rc.Close()
+
+	dlData, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded content: %v", err)
+	}
+	if len(dlData) != 0 {
+		t.Errorf("Expected empty mock download body, got %d bytes", len(dlData))
+	}
 }
 
-func TestDiskStorageProvider_Upload(t *testing.T) {
+func TestDiskStorageProvider_UploadAndDownload(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfg := &Config{}
 	cfg.Storage.Disk.BasePath = tmpDir
@@ -60,6 +75,20 @@ func TestDiskStorageProvider_Upload(t *testing.T) {
 	}
 	if !bytes.Equal(savedData, data) {
 		t.Errorf("Saved data mismatch. Got %s", string(savedData))
+	}
+
+	rc, err := provider.Download(context.Background(), "/out/test.txt")
+	if err != nil {
+		t.Fatalf("Download failed: %v", err)
+	}
+	defer rc.Close()
+
+	downloadedData, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("Failed to read stream: %v", err)
+	}
+	if !bytes.Equal(downloadedData, data) {
+		t.Errorf("Downloaded data mismatch. Got %s", string(downloadedData))
 	}
 }
 

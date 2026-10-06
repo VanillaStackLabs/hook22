@@ -61,7 +61,11 @@ func main() {
 	InitWebhookDispatcher(cfg)
 	storageBackend := initStorageProvider(context.Background(), cfg)
 
-	sshConfig, err := buildSSHConfig(cfg)
+	// Register outbound push endpoint
+	http.HandleFunc("/api/v1/sftp/push", handleOutboundPush(storageBackend))
+
+	// Pass nil for resolver if using static YAML auth only
+	sshConfig, err := buildSSHConfig(cfg, nil)
 	if err != nil {
 		slog.Error("Failed to build SSH configuration", "event", "ssh.config_error", "error", err.Error())
 		os.Exit(1)

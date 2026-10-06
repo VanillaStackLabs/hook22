@@ -14,6 +14,10 @@ server:
   trusted_ca_path: "./keys/ca.pub"
 storage:
   driver: "mock"
+pgp:
+  enabled: true
+  private_key_path: "./keys/pgp_private.asc"
+  passphrase: "secretpassphrase"
 webhook:
   url: "http://example.com/hook"
   secret: "secret123"
@@ -36,6 +40,15 @@ users:
 
 	if cfg.Server.TrustedCAPath != "./keys/ca.pub" {
 		t.Errorf("Expected trusted CA path './keys/ca.pub', got %s", cfg.Server.TrustedCAPath)
+	}
+	if !cfg.PGP.Enabled {
+		t.Error("Expected cfg.PGP.Enabled to be true")
+	}
+	if cfg.PGP.PrivateKeyPath != "./keys/pgp_private.asc" {
+		t.Errorf("Expected private key path './keys/pgp_private.asc', got %s", cfg.PGP.PrivateKeyPath)
+	}
+	if cfg.PGP.Passphrase != "secretpassphrase" {
+		t.Errorf("Expected passphrase 'secretpassphrase', got %s", cfg.PGP.Passphrase)
 	}
 	if len(cfg.Users) != 1 || cfg.Users[0].Username != "testuser" {
 		t.Errorf("Unexpected users config: %+v", cfg.Users)

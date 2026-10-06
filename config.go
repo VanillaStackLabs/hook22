@@ -36,6 +36,12 @@ type Config struct {
 		} `yaml:"disk"`
 	} `yaml:"storage"`
 
+	PGP struct {
+		Enabled        bool   `yaml:"enabled"`
+		PrivateKeyPath string `yaml:"private_key_path"`
+		Passphrase     string `yaml:"passphrase"`
+	} `yaml:"pgp"`
+
 	Webhook struct {
 		URL         string `yaml:"url"`
 		Secret      string `yaml:"secret"`

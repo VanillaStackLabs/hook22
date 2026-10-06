@@ -87,6 +87,7 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 
 func (d *WebhookDispatcher) worker(id int) {
 	defer d.wg.Done()
+	slog.Debug("Starting webhook worker", "worker_id", id)
 	for task := range d.taskQueue {
 		d.processTask(task)
 	}

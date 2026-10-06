@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -67,6 +69,28 @@ func (w *s3StreamWriter) Close() error {
 	return res.err
 }
 
+type streamReaderAt struct {
+	rc  io.ReadCloser
+	mu  sync.Mutex
+	pos int64
+}
+
+func (s *streamReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if off != s.pos {
+		return 0, fmt.Errorf("random-access read unsupported on zero-disk stream (expected offset %d, got %d)", s.pos, off)
+	}
+
+	n, err = io.ReadFull(s.rc, p)
+	if err == io.ErrUnexpectedEOF {
+		err = io.EOF
+	}
+	s.pos += int64(n)
+	return n, err
+}
+
 type gatewayHandler struct {
 	storage  StorageProvider
 	cfg      *Config
@@ -81,12 +105,26 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 
 	go func() {
 		startTime := time.Now()
-		hash, sizeBytes, err := h.storage.Upload(context.Background(), req.Filepath, pipeR)
+		var uploadStream io.Reader = pipeR
 
-		// Record Latency
+		ext := filepath.Ext(req.Filepath)
+		isPGPExt := ext == ".gpg" || ext == ".pgp"
+
+		if h.cfg.PGP.Enabled || isPGPExt {
+			slog.Info("Wrapping inbound upload stream with PGP decryption", "event", "pgp.decrypt_start", "filepath", req.Filepath)
+			decryptedR, err := DecryptStreamReader(pipeR, h.cfg.PGP.PrivateKeyPath, h.cfg.PGP.Passphrase)
+			if err != nil {
+				slog.Error("Failed to initialize PGP decryption stream", "event", "pgp.decrypt_error", "filepath", req.Filepath, "error", err.Error())
+				pipeR.CloseWithError(err)
+				doneChan <- uploadResult{err: fmt.Errorf("PGP decryption stream error: %w", err)}
+				return
+			}
+			uploadStream = decryptedR
+		}
+
+		hash, sizeBytes, err := h.storage.Upload(context.Background(), req.Filepath, uploadStream)
+
 		UploadDuration.Observe(time.Since(startTime).Seconds())
-
-		// Record Bytes if successful
 		if err == nil {
 			UploadBytesTotal.Add(float64(sizeBytes))
 		}
@@ -109,7 +147,63 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 }
 
 func (h *gatewayHandler) Fileread(req *sftp.Request) (io.ReaderAt, error) {
-	return nil, fmt.Errorf("downloads are disabled on this gateway")
+	slog.Info("Outbound SFTP download request", "event", "sftp.download_start", "filepath", req.Filepath, "username", h.username)
+
+	rc, err := h.storage.Download(context.Background(), req.Filepath)
+	if err != nil {
+		slog.Error("Failed to initiate outbound download stream", "event", "sftp.download_error", "filepath", req.Filepath, "error", err.Error())
+		return nil, err
+	}
+
+	return &streamReaderAt{rc: rc}, nil
 }
-func (h *gatewayHandler) Filecmd(req *sftp.Request) error                   { return nil }
-func (h *gatewayHandler) Filelist(req *sftp.Request) (sftp.ListerAt, error) { return nil, nil }
+
+// Dummy FileInfo to satisfy SFTP client stat/lstat queries without panicking
+type virtualFileInfo struct {
+	name  string
+	isDir bool
+}
+
+func (v *virtualFileInfo) Name() string { return v.name }
+func (v *virtualFileInfo) Size() int64  { return 0 }
+func (v *virtualFileInfo) Mode() os.FileMode {
+	if v.isDir {
+		return os.ModeDir | 0755
+	}
+	return 0644
+}
+func (v *virtualFileInfo) ModTime() time.Time { return time.Now() }
+func (v *virtualFileInfo) IsDir() bool        { return v.isDir }
+func (v *virtualFileInfo) Sys() interface{}   { return nil }
+
+func (h *gatewayHandler) Filecmd(req *sftp.Request) error {
+	switch req.Method {
+	case "Stat", "Lstat":
+		// Return virtual stat so clients (WinSCP, OpenSSH SFTP) don't crash when probing destination folders
+		return nil
+	default:
+		return nil
+	}
+}
+
+func (h *gatewayHandler) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
+	switch req.Method {
+	case "Stat", "Lstat":
+		return listerAt([]os.FileInfo{&virtualFileInfo{name: filepath.Base(req.Filepath), isDir: true}}), nil
+	default:
+		return listerAt([]os.FileInfo{}), nil
+	}
+}
+
+type listerAt []os.FileInfo
+
+func (l listerAt) ListAt(f []os.FileInfo, offset int64) (int, error) {
+	if offset >= int64(len(l)) {
+		return 0, io.EOF
+	}
+	n := copy(f, l[offset:])
+	if n < len(l[offset:]) {
+		return n, nil
+	}
+	return n, io.EOF
+}

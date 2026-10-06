@@ -1,0 +1,21 @@
+server:
+  port: 2222
+  host_key_path: "./keys/host_rsa"
+
+storage:
+  driver: "s3" # Options: mock, s3, gcs, azure
+  s3:
+    bucket: "my-sftp-drops"
+    region: "us-east-1"
+    endpoint: "" # Left blank for AWS; filled for MinIO/Cloudflare R2
+    access_key: "ENV_AWS_ACCESS_KEY"
+    secret_key: "ENV_AWS_SECRET_KEY"
+
+webhook:
+  url: "https://webhook.site/d750831a-f82d-465f-98e7-0f1756594dcb"
+  secret: "whsec_supersecretkey123"
+
+# Hardcoded users for Open-Source mode (Control Plane API will replace this in Enterprise)
+users:
+  - username: "acme_corp"
+    password: "password"

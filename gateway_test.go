@@ -56,3 +56,39 @@ func TestS3StreamWriter_OutOfOrderChunks(t *testing.T) {
 		t.Errorf("Stream reordering failed.\nGot:  %s\nWant: %s", readBuffer.String(), expected)
 	}
 }
+
+func TestStreamReaderAt_SequentialReads(t *testing.T) {
+	data := []byte("0123456789abcdefghij")
+	rc := io.NopCloser(bytes.NewReader(data))
+	sra := &streamReaderAt{rc: rc}
+
+	buf1 := make([]byte, 10)
+	n, err := sra.ReadAt(buf1, 0)
+	if err != nil || n != 10 {
+		t.Fatalf("ReadAt chunk 1 failed: %v (n=%d)", err, n)
+	}
+	if string(buf1) != "0123456789" {
+		t.Errorf("Got %s, want 0123456789", string(buf1))
+	}
+
+	buf2 := make([]byte, 10)
+	n, err = sra.ReadAt(buf2, 10)
+	if err != nil || n != 10 {
+		t.Fatalf("ReadAt chunk 2 failed: %v (n=%d)", err, n)
+	}
+	if string(buf2) != "abcdefghij" {
+		t.Errorf("Got %s, want abcdefghij", string(buf2))
+	}
+}
+
+func TestStreamReaderAt_NonSequentialReadFails(t *testing.T) {
+	data := []byte("0123456789")
+	rc := io.NopCloser(bytes.NewReader(data))
+	sra := &streamReaderAt{rc: rc}
+
+	buf := make([]byte, 5)
+	_, err := sra.ReadAt(buf, 5) // Expected offset 0, passed offset 5
+	if err == nil {
+		t.Error("Expected error on non-sequential offset read, got nil")
+	}
+}

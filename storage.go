@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -22,6 +23,7 @@ import (
 
 type StorageProvider interface {
 	Upload(ctx context.Context, filepath string, r io.Reader) (hash string, sizeBytes int64, err error)
+	Download(ctx context.Context, filepath string) (io.ReadCloser, error)
 }
 
 type MockStorageProvider struct{}
@@ -40,8 +42,14 @@ func (m *MockStorageProvider) Upload(ctx context.Context, filepath string, r io.
 	return hashStr, written, nil
 }
 
+func (m *MockStorageProvider) Download(ctx context.Context, filepath string) (io.ReadCloser, error) {
+	slog.Info("Streaming bytes from mock memory storage", "event", "storage.mock_download", "filepath", filepath)
+	return io.NopCloser(bytes.NewReader([]byte{})), nil
+}
+
 type S3Provider struct {
 	cfg      *Config
+	client   *s3.Client
 	uploader *transfermanager.Client
 }
 
@@ -72,6 +80,7 @@ func NewS3Provider(ctx context.Context, cfg *Config) (*S3Provider, error) {
 
 	return &S3Provider{
 		cfg:      cfg,
+		client:   client,
 		uploader: uploader,
 	}, nil
 }
@@ -97,6 +106,23 @@ func (s *S3Provider) Upload(ctx context.Context, filepath string, r io.Reader) (
 
 	hashStr := hex.EncodeToString(hasher.Sum(nil))
 	return hashStr, cw.bytesWritten, nil
+}
+
+func (s *S3Provider) Download(ctx context.Context, filepath string) (io.ReadCloser, error) {
+	s3Key := filepath
+	if len(s3Key) > 0 && s3Key[0] == '/' {
+		s3Key = s3Key[1:]
+	}
+
+	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s.cfg.Storage.S3.Bucket),
+		Key:    aws.String(s3Key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("S3 download failed: %w", err)
+	}
+
+	return out.Body, nil
 }
 
 type GCSProvider struct {
@@ -137,6 +163,22 @@ func (g *GCSProvider) Upload(ctx context.Context, filepath string, r io.Reader) 
 	return hex.EncodeToString(hasher.Sum(nil)), cw.bytesWritten, nil
 }
 
+func (g *GCSProvider) Download(ctx context.Context, filepath string) (io.ReadCloser, error) {
+	gcsKey := filepath
+	if len(gcsKey) > 0 && gcsKey[0] == '/' {
+		gcsKey = gcsKey[1:]
+	}
+
+	bucket := g.client.Bucket(g.cfg.Storage.GCS.Bucket)
+	obj := bucket.Object(gcsKey)
+	r, err := obj.NewReader(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("GCS download failed: %w", err)
+	}
+
+	return r, nil
+}
+
 type AzureProvider struct {
 	cfg    *Config
 	client *azblob.Client
@@ -173,6 +215,20 @@ func (a *AzureProvider) Upload(ctx context.Context, filepath string, r io.Reader
 	return hex.EncodeToString(hasher.Sum(nil)), cw.bytesWritten, nil
 }
 
+func (a *AzureProvider) Download(ctx context.Context, filepath string) (io.ReadCloser, error) {
+	blobName := filepath
+	if len(blobName) > 0 && blobName[0] == '/' {
+		blobName = blobName[1:]
+	}
+
+	resp, err := a.client.DownloadStream(ctx, a.cfg.Storage.Azure.Container, blobName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Azure download failed: %w", err)
+	}
+
+	return resp.Body, nil
+}
+
 type DiskProvider struct {
 	cfg *Config
 }
@@ -207,6 +263,20 @@ func (d *DiskProvider) Upload(ctx context.Context, reqPath string, r io.Reader) 
 	}
 
 	return hex.EncodeToString(hasher.Sum(nil)), cw.bytesWritten, nil
+}
+
+func (d *DiskProvider) Download(ctx context.Context, reqPath string) (io.ReadCloser, error) {
+	if d.cfg.Storage.Disk.BasePath == "" {
+		return nil, fmt.Errorf("disk base_path is not configured")
+	}
+
+	fullPath := filepath.Join(d.cfg.Storage.Disk.BasePath, reqPath)
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open file on disk: %w", err)
+	}
+
+	return file, nil
 }
 
 type byteCounterWriter struct {
