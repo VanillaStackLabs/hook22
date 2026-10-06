@@ -17,29 +17,36 @@ func initStorageProvider(ctx context.Context, cfg *Config) StorageProvider {
 	case "s3":
 		provider, err := NewS3Provider(ctx, cfg)
 		if err != nil {
-			slog.Error("S3 initialization failed", "error", err.Error())
-			return &MockStorageProvider{}
+			slog.Error("S3 initialization failed (halting boot)", "error", err.Error())
+			os.Exit(1)
+			return nil
 		}
 		return provider
 	case "gcs":
 		provider, err := NewGCSProvider(ctx, cfg)
 		if err != nil {
-			slog.Error("GCS initialization failed", "error", err.Error())
-			return &MockStorageProvider{}
+			slog.Error("GCS initialization failed (halting boot)", "error", err.Error())
+			os.Exit(1)
+			return nil
 		}
 		return provider
 	case "azure":
 		provider, err := NewAzureProvider(cfg)
 		if err != nil {
-			slog.Error("Azure initialization failed", "error", err.Error())
-			return &MockStorageProvider{}
+			slog.Error("Azure initialization failed (halting boot)", "error", err.Error())
+			os.Exit(1)
+			return nil
 		}
 		return provider
 	case "disk":
 		return NewDiskProvider(cfg)
-	default:
-		slog.Info("Using mock in-memory storage provider", "driver", cfg.Storage.Driver)
+	case "mock":
+		slog.Warn("Using mock in-memory storage provider. DATA WILL BE DISCARDED.", "event", "storage.mock_warning")
 		return &MockStorageProvider{}
+	default:
+		slog.Error("Unknown storage driver specified in config", "driver", cfg.Storage.Driver)
+		os.Exit(1)
+		return nil
 	}
 }
 

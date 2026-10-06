@@ -2,8 +2,14 @@ package main
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -23,7 +29,7 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 
 	sshConfig := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			// 1. Static YAML Lookup
+			// Static YAML Lookup
 			for _, u := range cfg.Users {
 				if c.User() == u.Username && string(pass) == u.Password {
 					return &ssh.Permissions{
@@ -35,7 +41,7 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 				}
 			}
 
-			// 2. Dynamic Control Plane Fallback
+			// Dynamic Control Plane Fallback
 			if resolver != nil {
 				if perms, ok := resolver.AuthenticatePassword(c.User(), string(pass)); ok {
 					return &ssh.Permissions{
@@ -52,7 +58,7 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 			return nil, fmt.Errorf("password rejected for %q", c.User())
 		},
 		PublicKeyCallback: func(c ssh.ConnMetadata, pubKey ssh.PublicKey) (*ssh.Permissions, error) {
-			// 1. OpenSSH Certificate Validation
+			// OpenSSH Certificate Validation
 			if cert, ok := pubKey.(*ssh.Certificate); ok && trustedCAPubKey != nil {
 				checker := ssh.CertChecker{
 					IsUserAuthority: func(auth ssh.PublicKey) bool {
@@ -70,7 +76,7 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 				}
 			}
 
-			// 2. Static Authorized Keys
+			// Static Authorized Keys
 			for _, u := range cfg.Users {
 				if c.User() == u.Username {
 					for _, keyStr := range u.PublicKeys {
@@ -104,6 +110,16 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 
 			return nil, fmt.Errorf("public key rejected for %q", c.User())
 		},
+	}
+
+	// Auto-generate Host Key if it doesn't exist
+	if _, err := os.Stat(cfg.Server.HostKeyPath); os.IsNotExist(err) {
+		slog.Warn("Host key not found, auto-generating default RSA key", "event", "ssh.keygen", "path", cfg.Server.HostKeyPath)
+		if err := os.MkdirAll(filepath.Dir(cfg.Server.HostKeyPath), 0755); err == nil {
+			key, _ := rsa.GenerateKey(rand.Reader, 2048)
+			pemBlock := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)})
+			_ = os.WriteFile(cfg.Server.HostKeyPath, pemBlock, 0600)
+		}
 	}
 
 	privateBytes, err := os.ReadFile(cfg.Server.HostKeyPath)
