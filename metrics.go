@@ -30,4 +30,9 @@ var (
 		Name: "hook22_webhook_deliveries_total",
 		Help: "Total number of webhook deliveries by final status",
 	}, []string{"status"})
+
+	RabbitMQQueueDepth = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "hook22_rabbitmq_queue_depth",
+		Help: "Current number of unprocessed webhook events sitting in RabbitMQ",
+	})
 )

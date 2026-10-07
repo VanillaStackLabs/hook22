@@ -1,6 +1,19 @@
 # Hook22
 
+![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?style=flat-square&logo=go)
+![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker)
+![License](https://img.shields.io/badge/license-Open--Core-emerald?style=flat-square)
+![Architecture](https://img.shields.io/badge/architecture-Zero--Disk%20Stream-purple?style=flat-square)
+
 **Hook22** is an open-core, high-performance SFTP-to-Webhook gateway designed for enterprise B2B data integrations. It bridges legacy SFTP file transfers with modern REST/API infrastructure through zero-disk streaming into cloud storage, in-flight OpenPGP decryption, dynamic multi-tenant authentication, and bi-directional outbound file pushes.
+
+---
+
+## Why Hook22?
+
+- **Replaces AWS Transfer Family:** Eliminates $216+/month idle endpoint costs and complex S3 Event + Lambda decryption glue code.
+- **Zero-Disk RAM Streaming:** Inbound files stream directly to cloud storage in memory without writing unencrypted data to host disks (simplifying SOC2 & HIPAA compliance).
+- **Stateless & Database-Free:** Operates as a lean Go container with near-zero memory footprint and no required backing database.
 
 ---
 
@@ -44,6 +57,18 @@ Run the entire local gateway stack alongside MinIO (S3 emulator) and a webhook r
 
 ```bash
 docker-compose up -d
+```
+
+### 1-Minute End-to-End Test
+```bash
+# 1. Boot the stack
+docker-compose up -d
+
+# 2. Upload a test file via SFTP (Password: e2e_password)
+echo "id,amount\n1,100" > invoice.csv
+sshpass -p "e2e_password" sftp -P 2222 -o StrictHostKeyChecking=no e2e_user@localhost <<< "put invoice.csv"
+
+# 3. View the live JSON webhook received at http://localhost:3000
 ```
 
 ### Exposed Endpoints

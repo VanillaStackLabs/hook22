@@ -1,7 +1,7 @@
 server:
   port: 2222
   host_key_path: "./keys/host_rsa"
-  trusted_ca_path: "./keys/trusted_ca.pub"
+  trusted_ca_path: ""
 
 rabbitmq:
   enabled: true
