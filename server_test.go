@@ -39,7 +39,7 @@ func TestGatewayServer_StartAndShutdown(t *testing.T) {
 	go func() {
 		serverErrChan <- server.Start("127.0.0.1:0")
 	}()
-	
+
 	// Polling
 	for i := 0; i < 50; i++ {
 		time.Sleep(10 * time.Millisecond)
