@@ -63,7 +63,7 @@ func main() {
 		slog.Error("Storage initialization failed", "error", err.Error())
 		os.Exit(1)
 	}
-	
+
 	// Register outbound push endpoint
 	http.HandleFunc("/api/v1/sftp/push", handleOutboundPush(storageBackend))
 

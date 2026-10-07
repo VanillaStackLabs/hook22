@@ -33,13 +33,13 @@ type WebhookTask struct {
 }
 
 type WebhookDispatcher struct {
-	cfg        *Config
-	client     *http.Client
-	taskQueue  chan WebhookTask
-	amqpConn   *amqp.Connection
-	amqpChan   *amqp.Channel
-	wg         sync.WaitGroup
-	useRabbit  bool
+	cfg       *Config
+	client    *http.Client
+	taskQueue chan WebhookTask
+	amqpConn  *amqp.Connection
+	amqpChan  *amqp.Channel
+	wg        sync.WaitGroup
+	useRabbit bool
 }
 
 var globalDispatcher *WebhookDispatcher
