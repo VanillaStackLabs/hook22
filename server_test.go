@@ -13,7 +13,6 @@ import (
 )
 
 func TestGatewayServer_StartAndShutdown(t *testing.T) {
-	// Generate RSA Host Key so SSH handshake doesn't fail
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("Failed to generate test RSA key: %v", err)
@@ -37,33 +36,30 @@ func TestGatewayServer_StartAndShutdown(t *testing.T) {
 
 	serverErrChan := make(chan error, 1)
 
-	// Start server on an ephemeral port
 	go func() {
 		serverErrChan <- server.Start("127.0.0.1:0")
 	}()
-
-	var boundAddr net.Addr
-	for i := 0; i < 20; i++ {
+	
+	// Polling
+	for i := 0; i < 50; i++ {
 		time.Sleep(10 * time.Millisecond)
 		if server.listener != nil {
-			boundAddr = server.listener.Addr()
 			break
 		}
 	}
 
-	if boundAddr == nil {
+	if server.listener == nil {
 		t.Fatalf("Server listener failed to bind within timeout")
 	}
 
-	// Trigger Shutdown cleanly
 	server.Shutdown()
 
 	select {
 	case err := <-serverErrChan:
 		if err != nil && err != net.ErrClosed {
-			t.Errorf("Unexpected server start error: %v", err)
+			t.Errorf("Unexpected error from server.Start(): %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Timeout waiting for server goroutine to terminate")
+		t.Fatal("Timeout waiting for server goroutine to exit")
 	}
 }
