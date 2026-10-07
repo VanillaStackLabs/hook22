@@ -34,32 +34,31 @@ func TestGatewayServer_StartAndShutdown(t *testing.T) {
 
 	server := NewGatewayServer(cfg, sshConfig, storage)
 
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Failed to bind ephemeral listener: %v", err)
+	}
+
+	server.mu.Lock()
+	server.listener = listener
+	server.mu.Unlock()
+
 	serverErrChan := make(chan error, 1)
 
 	go func() {
-		serverErrChan <- server.Start("127.0.0.1:0")
+		serverErrChan <- server.Serve(listener)
 	}()
 
-	// Polling
-	for i := 0; i < 50; i++ {
-		time.Sleep(10 * time.Millisecond)
-		if server.listener != nil {
-			break
-		}
-	}
-
-	if server.listener == nil {
-		t.Fatalf("Server listener failed to bind within timeout")
-	}
+	time.Sleep(50 * time.Millisecond)
 
 	server.Shutdown()
 
 	select {
 	case err := <-serverErrChan:
 		if err != nil && err != net.ErrClosed {
-			t.Errorf("Unexpected error from server.Start(): %v", err)
+			t.Errorf("Unexpected error during shutdown: %v", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("Timeout waiting for server goroutine to exit")
+		t.Fatal("Timeout waiting for server to shut down")
 	}
 }
