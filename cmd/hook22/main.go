@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	"github.com/VanillaStackLabs/hook22/pkg/auth"
@@ -66,23 +67,46 @@ func main() {
 		os.Exit(1)
 	}
 
-	// HTTP Routes
-	http.Handle("/metrics", promhttp.Handler())
-	http.HandleFunc("/api/v1/login", auth.HandleLogin(cfg, nil))
-	http.HandleFunc("/api/v1/logs/stream", auth.RequireCookieAuth(cfg.Server.SessionSecret, handleLogStream(broadcaster)))
-	http.HandleFunc("/api/v1/sftp/push", auth.RequireCookieAuth(cfg.Server.SessionSecret, gateway.HandleOutboundPush(storageBackend)))
-
-	go http.ListenAndServe(":8080", nil)
-
-	// Pass nil for resolver if using static YAML auth only
+	// SSH Config
 	sshConfig, err := auth.BuildSSHConfig(cfg, nil)
 	if err != nil {
 		slog.Error("Failed to build SSH configuration", "event", "ssh.config_error", "error", err.Error())
 		os.Exit(1)
 	}
 
-	// Start Server Goroutine
+	// Start Server
 	server := gateway.NewGatewayServer(cfg, sshConfig, storageBackend)
+
+	// Mutex for config updates and reload callback for runtime driver swaps
+	var configMutex sync.RWMutex
+	reloadStorageBackend := func(updatedCfg *config.Config) error {
+		newBackend, err := initStorageProvider(context.Background(), updatedCfg)
+		if err != nil {
+			return fmt.Errorf("failed to re-initialize storage provider: %w", err)
+		}
+		server.SetStorage(newBackend)
+		slog.Info("Hot-reloaded storage driver", "driver", updatedCfg.Storage.Driver)
+		return nil
+	}
+
+	// HTTP Routes
+	http.Handle("/metrics", promhttp.Handler())
+	http.HandleFunc("/api/v1/login", auth.HandleLogin(cfg, nil))
+	http.HandleFunc("/api/v1/logs/stream", auth.RequireCookieAuth(cfg.Server.SessionSecret, handleLogStream(broadcaster)))
+	http.HandleFunc("/api/v1/sftp/push", auth.RequireCookieAuth(cfg.Server.SessionSecret, gateway.HandleOutboundPush(storageBackend)))
+
+	// Vault Configuration Endpoints
+	http.HandleFunc("/api/v1/vaults", auth.RequireCookieAuth(cfg.Server.SessionSecret, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			gateway.HandleGetVaults(cfg)(w, r)
+		} else if r.Method == http.MethodPost || r.Method == http.MethodPut {
+			gateway.HandleUpdateVault(cfg, &configMutex, reloadStorageBackend)(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	}))
+
+	go http.ListenAndServe(":8080", nil)
 
 	go func() {
 		listenAddr := fmt.Sprintf("0.0.0.0:%d", cfg.Server.Port)

@@ -8,7 +8,7 @@ RUN go mod download
 
 # Copy source code and build statically linked binary
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o sftp-webhook-gateway .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o sftp-webhook-gateway ./cmd/hook22
 
 # Alpine Runtime
 FROM alpine:latest

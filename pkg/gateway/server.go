@@ -20,6 +20,7 @@ type GatewayServer struct {
 	storage   storage.StorageProvider
 	listener  net.Listener
 	connWg    sync.WaitGroup
+	storageMu sync.RWMutex // Protects s.storage during dynamic hot-reloads
 }
 
 func NewGatewayServer(cfg *config.Config, sshCfg *ssh.ServerConfig, storage storage.StorageProvider) *GatewayServer {
@@ -28,6 +29,20 @@ func NewGatewayServer(cfg *config.Config, sshCfg *ssh.ServerConfig, storage stor
 		sshConfig: sshCfg,
 		storage:   storage,
 	}
+}
+
+// SetStorage thread-safely replaces the active storage driver at runtime.
+func (s *GatewayServer) SetStorage(newStorage storage.StorageProvider) {
+	s.storageMu.Lock()
+	defer s.storageMu.Unlock()
+	s.storage = newStorage
+}
+
+// GetStorage returns the active storage driver thread-safely.
+func (s *GatewayServer) GetStorage() storage.StorageProvider {
+	s.storageMu.RLock()
+	defer s.storageMu.RUnlock()
+	return s.storage
 }
 
 func (s *GatewayServer) Listener() net.Listener {
@@ -46,7 +61,7 @@ func (s *GatewayServer) Start(addr string) error {
 		conn, err := s.listener.Accept()
 		if err != nil {
 			if errors.Is(err, net.ErrClosed) {
-				break // Expected error when shutting down
+				break
 			}
 			slog.Warn("Failed to accept TCP connection", "event", "server.accept_error", "error", err.Error())
 			continue
@@ -103,7 +118,7 @@ func (s *GatewayServer) handleConnection(conn net.Conn) {
 					req.Reply(true, nil)
 
 					handler := &gatewayHandler{
-						storage:  s.storage,
+						storage:  s.GetStorage(), // Thread-safe getter
 						cfg:      s.cfg,
 						username: sshConn.User(),
 					}
