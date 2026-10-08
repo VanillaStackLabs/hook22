@@ -96,3 +96,23 @@ func (r *HTTPControlPlaneResolver) sendAuthQuery(payload authRequestPayload) (*U
 
 	return &perms, true
 }
+
+// VerifyPasswordAuth returns the auth method ("static_password" or "dynamic_password")
+// and the associated user permissions. It returns an empty string if auth fails.
+func VerifyPasswordAuth(cfg *Config, resolver DynamicUserResolver, username, password string) (string, *UserPermissions) {
+	// Static YAML Lookup
+	for _, u := range cfg.Users {
+		if u.Username == username && u.Password == password {
+			return "static_password", nil
+		}
+	}
+
+	// Dynamic Control Plane Fallback
+	if resolver != nil {
+		if perms, ok := resolver.AuthenticatePassword(username, password); ok {
+			return "dynamic_password", perms
+		}
+	}
+
+	return "", nil
+}

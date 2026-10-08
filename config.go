@@ -11,6 +11,7 @@ type Config struct {
 		Port          int    `yaml:"port"`
 		HostKeyPath   string `yaml:"host_key_path"`
 		TrustedCAPath string `yaml:"trusted_ca_path"`
+		SessionSecret string `yaml:"session_secret"`
 	} `yaml:"server"`
 
 	Storage struct {

@@ -12,6 +12,8 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
+var asyncOutboundPush = executeOutboundPush
+
 type OutboundPushRequest struct {
 	RemoteHost string `json:"remote_host"` // e.g. "sftp.partner.com:22"
 	Username   string `json:"username"`
@@ -33,7 +35,7 @@ func handleOutboundPush(storage StorageProvider) http.HandlerFunc {
 			return
 		}
 
-		go executeOutboundPush(req, storage)
+		go asyncOutboundPush(req, storage)
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)

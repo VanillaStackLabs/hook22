@@ -29,30 +29,23 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 
 	sshConfig := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
-			// Static YAML Lookup
-			for _, u := range cfg.Users {
-				if c.User() == u.Username && string(pass) == u.Password {
-					return &ssh.Permissions{
-						Extensions: map[string]string{
-							"username":    c.User(),
-							"auth_method": "static_password",
-						},
-					}, nil
-				}
-			}
+			authMethod, perms := VerifyPasswordAuth(cfg, resolver, c.User(), string(pass))
 
-			// Dynamic Control Plane Fallback
-			if resolver != nil {
-				if perms, ok := resolver.AuthenticatePassword(c.User(), string(pass)); ok {
-					return &ssh.Permissions{
-						Extensions: map[string]string{
-							"username":             c.User(),
-							"auth_method":          "dynamic_password",
-							"prefix_pattern":       perms.S3PrefixPattern,
-							"webhook_override_url": perms.WebhookOverrideURL,
-						},
-					}, nil
+			if authMethod != "" {
+				extensions := map[string]string{
+					"username":    c.User(),
+					"auth_method": authMethod,
 				}
+
+				// Map dynamic tenant constraints if provided
+				if perms != nil {
+					extensions["prefix_pattern"] = perms.S3PrefixPattern
+					extensions["webhook_override_url"] = perms.WebhookOverrideURL
+				}
+
+				return &ssh.Permissions{
+					Extensions: extensions,
+				}, nil
 			}
 
 			return nil, fmt.Errorf("password rejected for %q", c.User())

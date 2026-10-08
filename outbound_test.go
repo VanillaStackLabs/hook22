@@ -9,8 +9,13 @@ import (
 )
 
 func TestHandleOutboundPush_AcceptedStatus(t *testing.T) {
-	storage := &MockStorageProvider{}
+	originalAsyncPush := asyncOutboundPush
+	asyncOutboundPush = func(req OutboundPushRequest, storage StorageProvider) {
+		// No-op: We are only testing the HTTP handler layer here
+	}
+	defer func() { asyncOutboundPush = originalAsyncPush }()
 
+	storage := &MockStorageProvider{}
 	handler := handleOutboundPush(storage)
 
 	reqPayload := OutboundPushRequest{
