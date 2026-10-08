@@ -1,10 +1,11 @@
-package main
+package auth
 
 import (
 	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"github.com/golang-jwt/jwt/v5"
 )
 
@@ -13,8 +14,8 @@ type LoginRequest struct {
 	Password string `json:"password"`
 }
 
-// handleLogin validates credentials and issues an HttpOnly JWT cookie
-func handleLogin(cfg *Config, resolver DynamicUserResolver) http.HandlerFunc {
+// HandleLogin validates credentials and issues an HttpOnly JWT cookie
+func HandleLogin(cfg *config.Config, resolver DynamicUserResolver) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -66,8 +67,8 @@ func handleLogin(cfg *Config, resolver DynamicUserResolver) http.HandlerFunc {
 	}
 }
 
-// requireCookieAuth extracts the cookie, validates the JWT signature, and permits access
-func requireCookieAuth(secret string, next http.HandlerFunc) http.HandlerFunc {
+// RequireCookieAuth extracts the cookie, validates the JWT signature, and permits access
+func RequireCookieAuth(secret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("hook22_auth")
 		if err != nil {

@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"crypto/rand"
@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -29,8 +31,8 @@ func TestGatewayServer_StartAndShutdown(t *testing.T) {
 	sshConfig := &ssh.ServerConfig{}
 	sshConfig.AddHostKey(signer)
 
-	cfg := &Config{}
-	storage := &MockStorageProvider{}
+	cfg := &config.Config{}
+	storage := &storage.MockStorageProvider{}
 
 	server := NewGatewayServer(cfg, sshConfig, storage)
 

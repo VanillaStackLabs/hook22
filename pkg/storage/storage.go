@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -13,8 +13,9 @@ import (
 
 	"cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/transfermanager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -48,15 +49,15 @@ func (m *MockStorageProvider) Download(ctx context.Context, filepath string) (io
 }
 
 type S3Provider struct {
-	cfg      *Config
+	cfg      *config.Config
 	client   *s3.Client
 	uploader *transfermanager.Client
 }
 
-func NewS3Provider(ctx context.Context, cfg *Config) (*S3Provider, error) {
-	awsCfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion(cfg.Storage.S3.Region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+func NewS3Provider(ctx context.Context, cfg *config.Config) (*S3Provider, error) {
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx,
+		awsconfig.WithRegion(cfg.Storage.S3.Region),
+		awsconfig.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
 			cfg.Storage.S3.AccessKey,
 			cfg.Storage.S3.SecretKey,
 			"",
@@ -126,11 +127,11 @@ func (s *S3Provider) Download(ctx context.Context, filepath string) (io.ReadClos
 }
 
 type GCSProvider struct {
-	cfg    *Config
+	cfg    *config.Config
 	client *storage.Client
 }
 
-func NewGCSProvider(ctx context.Context, cfg *Config) (*GCSProvider, error) {
+func NewGCSProvider(ctx context.Context, cfg *config.Config) (*GCSProvider, error) {
 	client, err := storage.NewClient(ctx, option.WithCredentialsFile(cfg.Storage.GCS.CredentialsFile))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GCS client: %w", err)
@@ -180,11 +181,11 @@ func (g *GCSProvider) Download(ctx context.Context, filepath string) (io.ReadClo
 }
 
 type AzureProvider struct {
-	cfg    *Config
+	cfg    *config.Config
 	client *azblob.Client
 }
 
-func NewAzureProvider(cfg *Config) (*AzureProvider, error) {
+func NewAzureProvider(cfg *config.Config) (*AzureProvider, error) {
 	cred, err := azblob.NewSharedKeyCredential(cfg.Storage.Azure.AccountName, cfg.Storage.Azure.AccountKey)
 	if err != nil {
 		return nil, fmt.Errorf("invalid Azure credentials: %w", err)
@@ -230,10 +231,10 @@ func (a *AzureProvider) Download(ctx context.Context, filepath string) (io.ReadC
 }
 
 type DiskProvider struct {
-	cfg *Config
+	cfg *config.Config
 }
 
-func NewDiskProvider(cfg *Config) *DiskProvider {
+func NewDiskProvider(cfg *config.Config) *DiskProvider {
 	return &DiskProvider{cfg: cfg}
 }
 

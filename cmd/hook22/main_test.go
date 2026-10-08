@@ -4,23 +4,27 @@ import (
 	"context"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/observability"
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
 )
 
 func TestInitStorageProvider_MockDriver(t *testing.T) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Storage.Driver = "mock"
 
 	provider, err := initStorageProvider(context.Background(), cfg)
 	if err != nil {
 		t.Fatalf("Unexpected error for mock driver: %v", err)
 	}
-	if _, ok := provider.(*MockStorageProvider); !ok {
+	if _, ok := provider.(*storage.MockStorageProvider); !ok {
 		t.Errorf("Expected MockStorageProvider, got %T", provider)
 	}
 }
 
 func TestInitStorageProvider_S3Driver(t *testing.T) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Storage.Driver = "s3"
 	cfg.Storage.S3.Region = "us-east-1"
 
@@ -28,13 +32,13 @@ func TestInitStorageProvider_S3Driver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error for S3 driver: %v", err)
 	}
-	if _, ok := provider.(*S3Provider); !ok {
+	if _, ok := provider.(*storage.S3Provider); !ok {
 		t.Errorf("Expected S3Provider, got %T", provider)
 	}
 }
 
 func TestInitStorageProvider_DefaultFallback(t *testing.T) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Storage.Driver = "unknown_driver"
 
 	provider, err := initStorageProvider(context.Background(), cfg)
@@ -47,7 +51,7 @@ func TestInitStorageProvider_DefaultFallback(t *testing.T) {
 }
 
 func TestHandleLogStream_SSEHeaders(t *testing.T) {
-	broadcaster := NewLogBroadcaster()
+	broadcaster := observability.NewLogBroadcaster()
 	handler := handleLogStream(broadcaster)
 
 	// Pre-cancel context so handler sets headers and exits immediately

@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"bytes"
@@ -11,10 +11,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"golang.org/x/crypto/ssh"
 )
 
-func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfig, error) {
+func BuildSSHConfig(cfg *config.Config, resolver DynamicUserResolver) (*ssh.ServerConfig, error) {
 	var trustedCAPubKey ssh.PublicKey
 	if cfg.Server.TrustedCAPath != "" {
 		caBytes, err := os.ReadFile(cfg.Server.TrustedCAPath)
@@ -87,7 +88,7 @@ func buildSSHConfig(cfg *Config, resolver DynamicUserResolver) (*ssh.ServerConfi
 				}
 			}
 
-			// 3. Dynamic Control Plane Fallback
+			// Dynamic Control Plane Fallback
 			if resolver != nil {
 				if perms, ok := resolver.AuthenticatePublicKey(c.User(), pubKey); ok {
 					return &ssh.Permissions{

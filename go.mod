@@ -1,4 +1,4 @@
-module github.com/VanillaStackLabs/sftp-webhook-gateway
+module github.com/VanillaStackLabs/hook22
 
 go 1.27.1
 

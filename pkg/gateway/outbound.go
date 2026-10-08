@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
@@ -22,7 +23,7 @@ type OutboundPushRequest struct {
 	TargetPath string `json:"target_remote_path"`
 }
 
-func handleOutboundPush(storage StorageProvider) http.HandlerFunc {
+func HandleOutboundPush(storage storage.StorageProvider) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -47,13 +48,13 @@ func handleOutboundPush(storage StorageProvider) http.HandlerFunc {
 	}
 }
 
-func executeOutboundPush(req OutboundPushRequest, storage StorageProvider) {
+func executeOutboundPush(req OutboundPushRequest, storage storage.StorageProvider) {
 	slog.Info("Executing outbound SFTP push", "event", "sftp.outbound_start", "remote_host", req.RemoteHost, "source_key", req.SourceKey)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	// 1. Obtain read stream from storage provider
+	// Obtain read stream from storage provider
 	srcStream, err := storage.Download(ctx, req.SourceKey)
 	if err != nil {
 		slog.Error("Outbound push failed: unable to fetch source file", "event", "sftp.outbound_source_error", "error", err.Error())
@@ -61,7 +62,7 @@ func executeOutboundPush(req OutboundPushRequest, storage StorageProvider) {
 	}
 	defer srcStream.Close()
 
-	// 2. Dial remote SSH server
+	// Dial remote SSH server
 	sshConfig := &ssh.ClientConfig{
 		User:            req.Username,
 		Auth:            []ssh.AuthMethod{ssh.Password(req.Password)},
@@ -83,7 +84,7 @@ func executeOutboundPush(req OutboundPushRequest, storage StorageProvider) {
 	}
 	defer client.Close()
 
-	// 3. Open remote file
+	// Open remote file
 	dstFile, err := client.Create(req.TargetPath)
 	if err != nil {
 		slog.Error("Outbound push failed: target file creation error", "event", "sftp.outbound_create_error", "error", err.Error())
@@ -91,7 +92,7 @@ func executeOutboundPush(req OutboundPushRequest, storage StorageProvider) {
 	}
 	defer dstFile.Close()
 
-	// 4. Stream directly from storage into remote SFTP file without saving to local disk
+	// Stream directly from storage into remote SFTP file without saving to local disk
 	written, err := io.Copy(dstFile, srcStream)
 	if err != nil {
 		slog.Error("Outbound push failed: streaming copy error", "event", "sftp.outbound_stream_error", "error", err.Error())

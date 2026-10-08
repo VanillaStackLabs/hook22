@@ -1,4 +1,4 @@
-package main
+package webhook
 
 import (
 	"bytes"
@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/observability"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -33,7 +35,7 @@ type WebhookTask struct {
 }
 
 type WebhookDispatcher struct {
-	cfg       *Config
+	cfg       *config.Config
 	client    *http.Client
 	taskQueue chan WebhookTask
 	amqpConn  *amqp.Connection
@@ -44,7 +46,7 @@ type WebhookDispatcher struct {
 
 var globalDispatcher *WebhookDispatcher
 
-func InitWebhookDispatcher(cfg *Config) {
+func InitWebhookDispatcher(cfg *config.Config) {
 	dispatcher := &WebhookDispatcher{
 		cfg:       cfg,
 		client:    &http.Client{Timeout: 10 * time.Second},
@@ -106,7 +108,7 @@ func InitWebhookDispatcher(cfg *Config) {
 	globalDispatcher = dispatcher
 }
 
-func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
+func TriggerWebhook(filepath, username, hash string, size int64, cfg *config.Config) {
 	payload := WebhookPayload{
 		Event:     "file.uploaded",
 		Username:  username,
@@ -153,7 +155,7 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 		)
 		if err != nil {
 			slog.Error("Failed to publish webhook task to RabbitMQ", "event", "rabbitmq.publish_error", "error", err.Error())
-			WebhookDeliveriesTotal.WithLabelValues("dropped_rabbitmq_error").Inc()
+			observability.WebhookDeliveriesTotal.WithLabelValues("dropped_rabbitmq_error").Inc()
 			return
 		}
 
@@ -164,7 +166,7 @@ func triggerWebhook(filepath, username, hash string, size int64, cfg *Config) {
 			slog.Info("Enqueued webhook delivery task (memory)", "event", "webhook.enqueue", "filepath", filepath)
 		default:
 			slog.Error("Webhook queue full, dropping event", "event", "webhook.queue_overflow", "filepath", filepath)
-			WebhookDeliveriesTotal.WithLabelValues("dropped_queue_full").Inc()
+			observability.WebhookDeliveriesTotal.WithLabelValues("dropped_queue_full").Inc()
 		}
 	}
 }
@@ -232,7 +234,7 @@ func (d *WebhookDispatcher) Shutdown() {
 	d.wg.Wait()
 }
 
-func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) bool {
+func dispatchWithRetry(task WebhookTask, cfg *config.Config, client *http.Client) bool {
 	body, err := json.Marshal(task.Payload)
 	if err != nil {
 		slog.Error("Failed to marshal webhook payload", "event", "webhook.marshal_error", "error", err.Error())
@@ -271,7 +273,7 @@ func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) bool 
 		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
 			resp.Body.Close()
 			slog.Info("Webhook delivered successfully", "event", "webhook.delivered", "filepath", task.Payload.Filepath, "status_code", resp.StatusCode)
-			WebhookDeliveriesTotal.WithLabelValues("success").Inc()
+			observability.WebhookDeliveriesTotal.WithLabelValues("success").Inc()
 			return true
 		}
 
@@ -284,7 +286,7 @@ func dispatchWithRetry(task WebhookTask, cfg *Config, client *http.Client) bool 
 
 		if task.Attempts >= maxRetries {
 			slog.Error("Webhook delivery exhausted max retries, dropping event", "event", "webhook.exhausted", "filepath", task.Payload.Filepath, "total_attempts", task.Attempts)
-			WebhookDeliveriesTotal.WithLabelValues("failure").Inc()
+			observability.WebhookDeliveriesTotal.WithLabelValues("failure").Inc()
 			return false
 		}
 

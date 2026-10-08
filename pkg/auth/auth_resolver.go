@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"bytes"
@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -99,7 +100,7 @@ func (r *HTTPControlPlaneResolver) sendAuthQuery(payload authRequestPayload) (*U
 
 // VerifyPasswordAuth returns the auth method ("static_password" or "dynamic_password")
 // and the associated user permissions. It returns an empty string if auth fails.
-func VerifyPasswordAuth(cfg *Config, resolver DynamicUserResolver, username, password string) (string, *UserPermissions) {
+func VerifyPasswordAuth(cfg *config.Config, resolver DynamicUserResolver, username, password string) (string, *UserPermissions) {
 	// Static YAML Lookup
 	for _, u := range cfg.Users {
 		if u.Username == username && u.Password == password {

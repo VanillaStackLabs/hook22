@@ -1,4 +1,4 @@
-package main
+package webhook
 
 import (
 	"crypto/hmac"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 )
 
 func TestTriggerWebhook_PayloadAndSignature(t *testing.T) {
@@ -25,7 +27,7 @@ func TestTriggerWebhook_PayloadAndSignature(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &Config{
+	cfg := &config.Config{
 		Webhook: struct {
 			URL         string `yaml:"url"`
 			Secret      string `yaml:"secret"`
@@ -100,7 +102,7 @@ func TestTriggerWebhook_RetryMechanismOnFailure(t *testing.T) {
 	}))
 	defer server.Close()
 
-	cfg := &Config{
+	cfg := &config.Config{
 		Webhook: struct {
 			URL         string `yaml:"url"`
 			Secret      string `yaml:"secret"`

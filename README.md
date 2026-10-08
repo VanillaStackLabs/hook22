@@ -11,7 +11,7 @@
 
 ## Why Hook22?
 
-- **Replaces AWS Transfer Family:** Eliminates $216+/month idle endpoint costs and complex S3 Event + Lambda decryption glue code.
+- **Replaces AWS Transfer Family:** Eliminates $200+/month idle endpoint costs and complex S3 Event + Lambda decryption glue code.
 - **Zero-Disk RAM Streaming:** Inbound files stream directly to cloud storage in memory without writing unencrypted data to host disks (simplifying SOC2 & HIPAA compliance).
 - **Stateless & Database-Free:** Operates as a lean Go container with near-zero memory footprint and no required backing database.
 
@@ -76,10 +76,9 @@ sshpass -p "e2e_password" sftp -P 2222 -o StrictHostKeyChecking=no e2e_user@loca
 |---|---|---|---|
 | SFTP Gateway | SFTP / SSH | `2222` | Inbound partner file upload interface |
 | Prometheus Metrics | HTTP | `8080` | `/metrics` |
-| Live SSE Log Stream | HTTP | `8080` | `/api/v1/logs/stream` |
-| Outbound Push API | HTTP | `8080` | `POST /api/v1/sftp/push` |
-| MinIO Console | HTTP | `9001` | S3 emulator dashboard (`minioadmin` / `minioadmin`) |
-| Webhook Echo Server | HTTP | `3000` | Local webhook receiver target |
+| UI Authentication | HTTP | `8080` | `POST /api/v1/login` (Issues HttpOnly JWT Cookie) |
+| Live SSE Log Stream | HTTP | `8080` | `/api/v1/logs/stream` (Protected) |
+| Outbound Push API | HTTP | `8080` | `POST /api/v1/sftp/push` (Protected) |
 
 ---
 
@@ -90,6 +89,7 @@ server:
   port: 2222
   host_key_path: "./keys/host_rsa"
   trusted_ca_path: "./keys/trusted_ca.pub"
+  session_secret: "change_this_to_a_secure_random_string"
 
 storage:
   driver: "s3" # Options: s3, gcs, azure, disk, mock
@@ -132,8 +132,33 @@ users:
 
 ## API Reference
 
-### 1. Trigger Outbound SFTP Push
+### 1. Authenticate (Login)
+Validates credentials against the static config or dynamic control plane and issues an `HttpOnly` JWT session cookie. This cookie is required for all subsequent API calls and SSE streams.
+
+**Request:**
+```http
+POST /api/v1/login HTTP/1.1
+Content-Type: application/json
+
+{
+  "username": "e2e_user",
+  "password": "e2e_password"
+}
+
+**Response (`202 Accepted`):**
+```json
+Set-Cookie: hook22_auth=<jwt_token>; Path=/; HttpOnly; Secure; SameSite=Lax
+Content-Type: application/json
+
+{
+  "status": "success"
+}
+```
+
+### 2. Trigger Outbound SFTP Push
 Pulls a file from storage and streams it to a remote partner's SFTP server:
+
+*(Requires a valid `hook22_auth` session cookie).*
 
 **Request:**
 ```http
@@ -158,7 +183,7 @@ Content-Type: application/json
 }
 ```
 
-### 2. Inbound Upload Webhook Payload
+### 3. Inbound Upload Webhook Payload
 Sent to your configured `webhook.url` after an upload completes and arrives in storage:
 
 ```json

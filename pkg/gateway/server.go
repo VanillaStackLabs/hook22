@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"errors"
@@ -7,24 +7,31 @@ import (
 	"net"
 	"sync"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/observability"
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
 type GatewayServer struct {
-	cfg       *Config
+	cfg       *config.Config
 	sshConfig *ssh.ServerConfig
-	storage   StorageProvider
+	storage   storage.StorageProvider
 	listener  net.Listener
 	connWg    sync.WaitGroup
 }
 
-func NewGatewayServer(cfg *Config, sshCfg *ssh.ServerConfig, storage StorageProvider) *GatewayServer {
+func NewGatewayServer(cfg *config.Config, sshCfg *ssh.ServerConfig, storage storage.StorageProvider) *GatewayServer {
 	return &GatewayServer{
 		cfg:       cfg,
 		sshConfig: sshCfg,
 		storage:   storage,
 	}
+}
+
+func (s *GatewayServer) Listener() net.Listener {
+	return s.listener
 }
 
 func (s *GatewayServer) Start(addr string) error {
@@ -69,8 +76,8 @@ func (s *GatewayServer) handleConnection(conn net.Conn) {
 		return
 	}
 
-	ActiveSSHSessions.Inc()
-	defer ActiveSSHSessions.Dec()
+	observability.ActiveSSHSessions.Inc()
+	defer observability.ActiveSSHSessions.Dec()
 	defer sshConn.Close()
 
 	slog.Info("Client authenticated", "event", "ssh.auth_success", "username", sshConn.User(), "remote_addr", conn.RemoteAddr().String())

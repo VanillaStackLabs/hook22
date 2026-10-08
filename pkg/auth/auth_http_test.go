@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"bytes"
@@ -8,11 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"github.com/golang-jwt/jwt/v5"
 )
 
 func TestHandleLogin_Success(t *testing.T) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Server.SessionSecret = "test_secret_123"
 	cfg.Users = []struct {
 		Username   string   `yaml:"username"`
@@ -28,7 +29,7 @@ func TestHandleLogin_Success(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewBuffer(body))
 	rec := httptest.NewRecorder()
 
-	handler := handleLogin(cfg, nil)
+	handler := HandleLogin(cfg, nil)
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -50,7 +51,7 @@ func TestHandleLogin_Success(t *testing.T) {
 }
 
 func TestHandleLogin_InvalidCredentials(t *testing.T) {
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Users = []struct {
 		Username   string   `yaml:"username"`
 		Password   string   `yaml:"password"`
@@ -65,7 +66,7 @@ func TestHandleLogin_InvalidCredentials(t *testing.T) {
 	req := httptest.NewRequest("POST", "/api/v1/login", bytes.NewBuffer(body))
 	rec := httptest.NewRecorder()
 
-	handler := handleLogin(cfg, nil)
+	handler := HandleLogin(cfg, nil)
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
@@ -93,7 +94,7 @@ func TestRequireCookieAuth_ValidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := requireCookieAuth(secret, nextHandler)
+	middleware := RequireCookieAuth(secret, nextHandler)
 	middleware.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -109,7 +110,7 @@ func TestRequireCookieAuth_MissingCookie(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := requireCookieAuth("secret", nextHandler)
+	middleware := RequireCookieAuth("secret", nextHandler)
 	middleware.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {
@@ -126,7 +127,7 @@ func TestRequireCookieAuth_InvalidToken(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	middleware := requireCookieAuth("secret", nextHandler)
+	middleware := RequireCookieAuth("secret", nextHandler)
 	middleware.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusUnauthorized {

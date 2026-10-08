@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"context"
@@ -10,6 +10,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/observability"
+	"github.com/VanillaStackLabs/hook22/pkg/security"
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
+	"github.com/VanillaStackLabs/hook22/pkg/webhook"
 	"github.com/pkg/sftp"
 )
 
@@ -24,7 +29,7 @@ type s3StreamWriter struct {
 	username string
 	pipeW    *io.PipeWriter
 	doneChan chan uploadResult
-	cfg      *Config
+	cfg      *config.Config
 
 	mu                 sync.Mutex
 	nextExpectedOffset int64
@@ -64,7 +69,7 @@ func (w *s3StreamWriter) Close() error {
 
 	res := <-w.doneChan
 	if res.err == nil {
-		triggerWebhook(w.filepath, w.username, res.hash, res.sizeBytes, w.cfg)
+		webhook.TriggerWebhook(w.filepath, w.username, res.hash, res.sizeBytes, w.cfg)
 	}
 	return res.err
 }
@@ -92,8 +97,8 @@ func (s *streamReaderAt) ReadAt(p []byte, off int64) (n int, err error) {
 }
 
 type gatewayHandler struct {
-	storage  StorageProvider
-	cfg      *Config
+	storage  storage.StorageProvider
+	cfg      *config.Config
 	username string
 }
 
@@ -112,7 +117,7 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 
 		if h.cfg.PGP.Enabled || isPGPExt {
 			slog.Info("Wrapping inbound upload stream with PGP decryption", "event", "pgp.decrypt_start", "filepath", req.Filepath)
-			decryptedR, err := DecryptStreamReader(pipeR, h.cfg.PGP.PrivateKeyPath, h.cfg.PGP.Passphrase)
+			decryptedR, err := security.DecryptStreamReader(pipeR, h.cfg.PGP.PrivateKeyPath, h.cfg.PGP.Passphrase)
 			if err != nil {
 				slog.Error("Failed to initialize PGP decryption stream", "event", "pgp.decrypt_error", "filepath", req.Filepath, "error", err.Error())
 				pipeR.CloseWithError(err)
@@ -124,9 +129,9 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 
 		hash, sizeBytes, err := h.storage.Upload(context.Background(), req.Filepath, uploadStream)
 
-		UploadDuration.Observe(time.Since(startTime).Seconds())
+		observability.UploadDuration.Observe(time.Since(startTime).Seconds())
 		if err == nil {
-			UploadBytesTotal.Add(float64(sizeBytes))
+			observability.UploadBytesTotal.Add(float64(sizeBytes))
 		}
 
 		doneChan <- uploadResult{

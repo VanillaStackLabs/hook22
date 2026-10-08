@@ -1,4 +1,4 @@
-package main
+package storage
 
 import (
 	"bytes"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 )
 
 func TestMockStorageProvider_UploadAndDownload(t *testing.T) {
@@ -46,7 +48,7 @@ func TestMockStorageProvider_UploadAndDownload(t *testing.T) {
 
 func TestDiskStorageProvider_UploadAndDownload(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Storage.Disk.BasePath = tmpDir
 
 	provider := NewDiskProvider(cfg)

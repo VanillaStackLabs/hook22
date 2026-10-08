@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"crypto/rand"
@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -20,13 +21,13 @@ func TestBuildSSHConfig_PublicKeyAuth(t *testing.T) {
 	tmpDir := t.TempDir()
 	hostKeyPath := filepath.Join(tmpDir, "host_rsa")
 
-	generateTestHostKey(t, hostKeyPath)
+	GenerateTestHostKey(t, hostKeyPath)
 
 	userKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	userPubKey, _ := ssh.NewPublicKey(&userKey.PublicKey)
 	userPubKeyBytes := ssh.MarshalAuthorizedKey(userPubKey)
 
-	cfg := &Config{}
+	cfg := &config.Config{}
 	cfg.Server.HostKeyPath = hostKeyPath
 	cfg.Users = []struct {
 		Username   string   `yaml:"username"`
@@ -39,7 +40,7 @@ func TestBuildSSHConfig_PublicKeyAuth(t *testing.T) {
 		},
 	}
 
-	sshCfg, err := buildSSHConfig(cfg, nil)
+	sshCfg, err := BuildSSHConfig(cfg, nil)
 	if err != nil {
 		t.Fatalf("buildSSHConfig failed: %v", err)
 	}

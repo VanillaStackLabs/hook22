@@ -1,13 +1,9 @@
 package main
 
 import (
-	"crypto/rand"
-	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,19 +12,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/VanillaStackLabs/hook22/pkg/auth"
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"github.com/VanillaStackLabs/hook22/pkg/gateway"
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
+	"github.com/VanillaStackLabs/hook22/pkg/webhook"
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
 )
 
 func TestE2E_FullPipeline(t *testing.T) {
 	secret := "whsec_e2e_secret_999"
-	webhookChan := make(chan WebhookPayload, 1)
+	webhookChan := make(chan webhook.WebhookPayload, 1)
 	sigChan := make(chan string, 1)
 
 	webhookServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sigChan <- r.Header.Get("Hook22-Signature")
 		body, _ := io.ReadAll(r.Body)
-		var payload WebhookPayload
+		var payload webhook.WebhookPayload
 		_ = json.Unmarshal(body, &payload)
 		webhookChan <- payload
 		w.WriteHeader(http.StatusOK)
@@ -37,27 +38,19 @@ func TestE2E_FullPipeline(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	hostKeyPath := filepath.Join(tmpDir, "host_rsa")
-	generateTestHostKey(t, hostKeyPath)
 
-	cfg := &Config{
-		Webhook: struct {
-			URL         string `yaml:"url"`
-			Secret      string `yaml:"secret"`
-			Workers     int    `yaml:"workers"`
-			MaxRetries  int    `yaml:"max_retries"`
-			BaseBackoff int    `yaml:"base_backoff"`
-		}{
-			URL:         webhookServer.URL,
-			Secret:      secret,
-			Workers:     2,
-			MaxRetries:  3,
-			BaseBackoff: 1,
-		},
-	}
+	// Uses the exported helper from pkg/auth/test_helpers.go
+	auth.GenerateTestHostKey(t, hostKeyPath)
 
-	// Initialize the worker pool for async test event processing
-	InitWebhookDispatcher(cfg)
-	storageBackend := &MockStorageProvider{}
+	cfg := &config.Config{}
+	cfg.Webhook.URL = webhookServer.URL
+	cfg.Webhook.Secret = secret
+	cfg.Webhook.Workers = 2
+	cfg.Webhook.MaxRetries = 3
+	cfg.Webhook.BaseBackoff = 1
+
+	webhook.InitWebhookDispatcher(cfg)
+	storageBackend := &storage.MockStorageProvider{}
 
 	sshConfig := &ssh.ServerConfig{
 		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
@@ -77,19 +70,14 @@ func TestE2E_FullPipeline(t *testing.T) {
 	}
 	sshConfig.AddHostKey(private)
 
-	// Replace raw listener with the new GatewayServer
-	server := NewGatewayServer(cfg, sshConfig, storageBackend)
+	server := gateway.NewGatewayServer(cfg, sshConfig, storageBackend)
 	go func() {
-		_ = server.Start("127.0.0.1:0") // Bind to an ephemeral port
+		_ = server.Start("127.0.0.1:0")
 	}()
 
-	// Give the server a fraction of a second to bind the listener
 	time.Sleep(100 * time.Millisecond)
-	if server.listener == nil {
-		t.Fatalf("Server failed to bind listener")
-	}
-	serverAddr := server.listener.Addr().String()
-	defer server.Shutdown() // Test graceful shutdown upon completion
+	serverAddr := server.Listener().Addr().String()
+	defer server.Shutdown()
 
 	clientConfig := &ssh.ClientConfig{
 		User: "e2e_user",
@@ -155,20 +143,5 @@ func TestE2E_FullPipeline(t *testing.T) {
 
 	case <-time.After(5 * time.Second):
 		t.Fatal("Timed out waiting for webhook dispatch after SFTP upload")
-	}
-}
-
-func generateTestHostKey(t *testing.T, path string) {
-	t.Helper()
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
-	if err != nil {
-		t.Fatalf("Failed to generate RSA key: %v", err)
-	}
-	privateKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "RSA PRIVATE KEY",
-		Bytes: x509.MarshalPKCS1PrivateKey(key),
-	})
-	if err := os.WriteFile(path, privateKeyPEM, 0600); err != nil {
-		t.Fatalf("Failed to write host key file: %v", err)
 	}
 }

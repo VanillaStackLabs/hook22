@@ -1,4 +1,4 @@
-package main
+package gateway
 
 import (
 	"bytes"
@@ -6,17 +6,19 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/VanillaStackLabs/hook22/pkg/storage"
 )
 
 func TestHandleOutboundPush_AcceptedStatus(t *testing.T) {
 	originalAsyncPush := asyncOutboundPush
-	asyncOutboundPush = func(req OutboundPushRequest, storage StorageProvider) {
+	asyncOutboundPush = func(req OutboundPushRequest, storage storage.StorageProvider) {
 		// No-op: We are only testing the HTTP handler layer here
 	}
 	defer func() { asyncOutboundPush = originalAsyncPush }()
 
-	storage := &MockStorageProvider{}
-	handler := handleOutboundPush(storage)
+	storage := &storage.MockStorageProvider{}
+	handler := HandleOutboundPush(storage)
 
 	reqPayload := OutboundPushRequest{
 		RemoteHost: "127.0.0.1:2222",
@@ -50,7 +52,7 @@ func TestHandleOutboundPush_AcceptedStatus(t *testing.T) {
 }
 
 func TestHandleOutboundPush_MethodNotAllowed(t *testing.T) {
-	handler := handleOutboundPush(&MockStorageProvider{})
+	handler := HandleOutboundPush(&storage.MockStorageProvider{})
 
 	req := httptest.NewRequest("GET", "/api/v1/sftp/push", nil)
 	rec := httptest.NewRecorder()

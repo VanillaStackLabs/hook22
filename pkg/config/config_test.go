@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"os"
@@ -33,7 +33,7 @@ users:
 		t.Fatalf("Failed to write temp config: %v", err)
 	}
 
-	cfg, err := loadConfig(configPath)
+	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		t.Fatalf("Expected no error, got %v", err)
 	}
@@ -59,7 +59,7 @@ users:
 }
 
 func TestLoadConfig_FileNotFound(t *testing.T) {
-	_, err := loadConfig("non_existent_file.yaml")
+	_, err := LoadConfig("non_existent_file.yaml")
 	if err == nil {
 		t.Error("Expected error for non-existent file, got nil")
 	}
@@ -71,7 +71,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 	configPath := filepath.Join(tmpDir, "bad_config.yaml")
 	os.WriteFile(configPath, content, 0644)
 
-	_, err := loadConfig(configPath)
+	_, err := LoadConfig(configPath)
 	if err == nil {
 		t.Error("Expected error for malformed YAML, got nil")
 	}
