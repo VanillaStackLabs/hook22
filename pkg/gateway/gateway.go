@@ -152,7 +152,9 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 		hash, sizeBytes, err := h.storage.Upload(context.Background(), req.Filepath, uploadStream)
 
 		observability.UploadDuration.Observe(time.Since(startTime).Seconds())
-		if err == nil {
+		if err != nil {
+			pipeR.CloseWithError(err)
+		} else P{
 			observability.UploadBytesTotal.Add(float64(sizeBytes))
 		}
 
