@@ -32,13 +32,34 @@ type s3StreamWriter struct {
 	cfg      *config.Config
 
 	mu                 sync.Mutex
+	spaceCond          *sync.Cond
+	maxPendingChunks   int
 	nextExpectedOffset int64
 	pendingChunks      map[int64][]byte
+
+	fatalErr           error
 }
 
 func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+
+	// Ensure that NO MATTER HOW we exit, we wake up peers.
+	defer w.spaceCond.Broadcast()
+
+	// If another worker already failed the stream, abort immediately.
+	if w.fatalErr != nil {
+		return 0, w.fatalErr
+	}
+
+	for len(w.pendingChunks) >= w.maxPendingChunks && off != w.nextExpectedOffset {
+		w.spaceCond.Wait()
+		
+		// When we wake up, we must check if we were woken up because of an error!
+		if w.fatalErr != nil {
+			return 0, w.fatalErr
+		}
+	}
 
 	chunkCopy := make([]byte, len(p))
 	copy(chunkCopy, p)
@@ -53,6 +74,8 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 
 		_, err := w.pipeW.Write(chunk)
 		if err != nil {
+			// Save the error before returning so peers know to abort
+			w.fatalErr = err 
 			return 0, err
 		}
 
@@ -62,7 +85,6 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 
 	return len(p), nil
 }
-
 func (w *s3StreamWriter) Close() error {
 	slog.Info("SFTP handle closed by client", "event", "sftp.close", "filepath", w.filepath, "username", w.username)
 	w.pipeW.Close()
@@ -141,14 +163,19 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 		}
 	}()
 
-	return &s3StreamWriter{
-		filepath:      req.Filepath,
-		username:      h.username,
-		pipeW:         pipeW,
-		doneChan:      doneChan,
-		cfg:           h.cfg,
-		pendingChunks: make(map[int64][]byte),
-	}, nil
+	writer := &s3StreamWriter{
+		filepath:         req.Filepath,
+		username:         h.username,
+		pipeW:            pipeW,
+		doneChan:         doneChan,
+		cfg:              h.cfg,
+		pendingChunks:    make(map[int64][]byte),
+		maxPendingChunks: 1024, // Strict memory bound limit
+	}
+	// Bind the condition variable to the existing mutex
+	writer.spaceCond = sync.NewCond(&writer.mu)
+
+	return writer, nil
 }
 
 func (h *gatewayHandler) Fileread(req *sftp.Request) (io.ReaderAt, error) {

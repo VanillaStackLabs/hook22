@@ -3,7 +3,9 @@ package gateway
 import (
 	"bytes"
 	"io"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestS3StreamWriter_OutOfOrderChunks(t *testing.T) {
@@ -11,12 +13,14 @@ func TestS3StreamWriter_OutOfOrderChunks(t *testing.T) {
 	doneChan := make(chan uploadResult, 1)
 
 	writer := &s3StreamWriter{
-		filepath:      "/test.csv",
-		username:      "testuser",
-		pipeW:         pipeW,
-		doneChan:      doneChan,
-		pendingChunks: make(map[int64][]byte),
+		filepath:         "/test.csv",
+		username:         "testuser",
+		pipeW:            pipeW,
+		doneChan:         doneChan,
+		pendingChunks:    make(map[int64][]byte),
+		maxPendingChunks: 10,
 	}
+	writer.spaceCond = sync.NewCond(&writer.mu)
 
 	var readBuffer bytes.Buffer
 	readDone := make(chan struct{})
@@ -91,4 +95,63 @@ func TestStreamReaderAt_NonSequentialReadFails(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error on non-sequential offset read, got nil")
 	}
+}
+
+func TestS3StreamWriter_Backpressure(t *testing.T) {
+	pipeR, pipeW := io.Pipe()
+	doneChan := make(chan uploadResult, 1)
+
+	// Set a very small capacity limit of 1 chunk
+	writer := &s3StreamWriter{
+		filepath:         "/test.csv",
+		username:         "testuser",
+		pipeW:            pipeW,
+		doneChan:         doneChan,
+		pendingChunks:    make(map[int64][]byte),
+		maxPendingChunks: 1, // Buffer full after 1 out-of-order chunk
+	}
+	writer.spaceCond = sync.NewCond(&writer.mu)
+
+	// Discard read output
+	go func() {
+		io.Copy(io.Discard, pipeR)
+	}()
+
+	chunk1 := []byte("11111") // offset 0
+	chunk2 := []byte("22222") // offset 5
+	chunk3 := []byte("33333") // offset 10
+
+	// Write chunk 2 (out of order, fills the buffer capacity of 1)
+	writer.WriteAt(chunk2, 5)
+
+	blockedWriteDone := make(chan struct{})
+	
+	// Write chunk 3 in a goroutine. This SHOULD block because capacity is full 
+	// and we are still waiting for chunk 1 (offset 0).
+	go func() {
+		writer.WriteAt(chunk3, 10)
+		close(blockedWriteDone)
+	}()
+
+	// Ensure chunk 3 is actually blocked
+	select {
+	case <-blockedWriteDone:
+		t.Fatal("WriteAt for chunk 3 completed, but it should have blocked due to backpressure")
+	case <-time.After(50 * time.Millisecond):
+		// it is blocked waiting for spaceCond
+	}
+
+	// Write chunk 1 (offset 0). This should flush chunk 1 and chunk 2, freeing space,
+	// which will broadcast to spaceCond and unblock chunk 3.
+	writer.WriteAt(chunk1, 0)
+
+	// Now chunk 3 should finish writing
+	select {
+	case <-blockedWriteDone:
+		// backpressure was released
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("WriteAt for chunk 3 is permanently stuck, spaceCond.Broadcast() failed")
+	}
+	
+	pipeW.Close()
 }
