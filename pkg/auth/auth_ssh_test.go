@@ -29,11 +29,7 @@ func TestBuildSSHConfig_PublicKeyAuth(t *testing.T) {
 
 	cfg := &config.Config{}
 	cfg.Server.HostKeyPath = hostKeyPath
-	cfg.Users = []struct {
-		Username   string   `yaml:"username"`
-		Password   string   `yaml:"password"`
-		PublicKeys []string `yaml:"public_keys"`
-	}{
+	cfg.Users = []config.UserConfig{
 		{
 			Username:   "key_user",
 			PublicKeys: []string{string(userPubKeyBytes)},

@@ -6,6 +6,13 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// Define the User structure exactly ONCE right here:
+type UserConfig struct {
+	Username     string   `yaml:"username" json:"username"`
+	PasswordHash string   `yaml:"password_hash" json:"-"`
+	PublicKeys   []string `yaml:"public_keys" json:"public_keys"`
+}
+
 type Config struct {
 	Server struct {
 		Port          int    `yaml:"port"`
@@ -44,8 +51,8 @@ type Config struct {
 	} `yaml:"pgp"`
 
 	RabbitMQ struct {
-		URL       string `yaml:"url"`        // e.g. "amqp://guest:guest@localhost:5672/"
-		QueueName string `yaml:"queue_name"` // e.g. "hook22_webhooks"
+		URL       string `yaml:"url"`
+		QueueName string `yaml:"queue_name"`
 		Enabled   bool   `yaml:"enabled"`
 	} `yaml:"rabbitmq"`
 
@@ -57,11 +64,8 @@ type Config struct {
 		BaseBackoff int    `yaml:"base_backoff"`
 	} `yaml:"webhook"`
 
-	Users []struct {
-		Username   string   `yaml:"username"`
-		Password   string   `yaml:"password"`
-		PublicKeys []string `yaml:"public_keys"`
-	} `yaml:"users"`
+	// Use the named struct here! Clean and simple.
+	Users []UserConfig `yaml:"users" json:"users"`
 }
 
 func LoadConfig(path string) (*Config, error) {

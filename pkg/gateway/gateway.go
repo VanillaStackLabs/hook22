@@ -37,7 +37,7 @@ type s3StreamWriter struct {
 	nextExpectedOffset int64
 	pendingChunks      map[int64][]byte
 
-	fatalErr           error
+	fatalErr error
 }
 
 func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
@@ -54,7 +54,7 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 
 	for len(w.pendingChunks) >= w.maxPendingChunks && off != w.nextExpectedOffset {
 		w.spaceCond.Wait()
-		
+
 		// When we wake up, we must check if we were woken up because of an error!
 		if w.fatalErr != nil {
 			return 0, w.fatalErr
@@ -75,7 +75,7 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 		_, err := w.pipeW.Write(chunk)
 		if err != nil {
 			// Save the error before returning so peers know to abort
-			w.fatalErr = err 
+			w.fatalErr = err
 			return 0, err
 		}
 
@@ -154,7 +154,7 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 		observability.UploadDuration.Observe(time.Since(startTime).Seconds())
 		if err != nil {
 			pipeR.CloseWithError(err)
-		} else P{
+		} else {
 			observability.UploadBytesTotal.Add(float64(sizeBytes))
 		}
 
