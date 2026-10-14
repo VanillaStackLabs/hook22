@@ -145,3 +145,48 @@ func TestE2E_FullPipeline(t *testing.T) {
 		t.Fatal("Timed out waiting for webhook dispatch after SFTP upload")
 	}
 }
+
+func TestE2E_AuthFailure(t *testing.T) {
+	tmpDir := t.TempDir()
+	hostKeyPath := filepath.Join(tmpDir, "host_rsa")
+	auth.GenerateTestHostKey(t, hostKeyPath)
+
+	cfg := &config.Config{}
+	storageBackend := &storage.MockStorageProvider{}
+
+	sshConfig := &ssh.ServerConfig{
+		PasswordCallback: func(c ssh.ConnMetadata, pass []byte) (*ssh.Permissions, error) {
+			if c.User() == "e2e_user" && string(pass) == "e2e_password" {
+				return nil, nil
+			}
+			return nil, ssh.ErrNoAuth
+		},
+	}
+	
+	privateBytes, _ := os.ReadFile(hostKeyPath)
+	private, _ := ssh.ParsePrivateKey(privateBytes)
+	sshConfig.AddHostKey(private)
+
+	server := gateway.NewGatewayServer(cfg, sshConfig, storageBackend)
+	go func() {
+		_ = server.Start("127.0.0.1:0")
+	}()
+
+	time.Sleep(100 * time.Millisecond)
+	serverAddr := server.Listener().Addr().String()
+	defer server.Shutdown()
+
+	clientConfig := &ssh.ClientConfig{
+		User: "e2e_user",
+		Auth: []ssh.AuthMethod{
+			ssh.Password("wrong_password"), // Deliberately incorrect password
+		},
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Safe here as we control the in-memory listener
+		Timeout:         2 * time.Second,
+	}
+
+	_, err := ssh.Dial("tcp", serverAddr, clientConfig)
+	if err == nil {
+		t.Fatal("Expected SSH dial to fail with wrong password, but it succeeded")
+	}
+}

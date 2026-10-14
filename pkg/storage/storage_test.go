@@ -119,3 +119,32 @@ func TestByteCounterWriter(t *testing.T) {
 		t.Errorf("Buffer output mismatch: %s", buf.String())
 	}
 }
+
+func TestDiskStorageProvider_PathTraversal(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfg := &config.Config{}
+	cfg.Storage.Disk.BasePath = tmpDir
+
+	provider := NewDiskProvider(cfg)
+	reader := bytes.NewReader([]byte("malicious payload"))
+
+	maliciousPath := "../../../etc/passwd"
+
+	// Test Upload Traversal Defense
+	_, _, err := provider.Upload(context.Background(), maliciousPath, reader)
+	if err == nil {
+		t.Fatal("Expected error when uploading with path traversal, got nil")
+	}
+	if err.Error() != "path traversal denied: "+maliciousPath {
+		t.Errorf("Expected path traversal denied error, got: %v", err)
+	}
+
+	// Test Download Traversal Defense
+	_, err = provider.Download(context.Background(), maliciousPath)
+	if err == nil {
+		t.Fatal("Expected error when downloading with path traversal, got nil")
+	}
+	if err.Error() != "path traversal denied: "+maliciousPath {
+		t.Errorf("Expected path traversal denied error, got: %v", err)
+	}
+}

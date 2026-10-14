@@ -21,11 +21,12 @@ func TestHandleOutboundPush_AcceptedStatus(t *testing.T) {
 	handler := HandleOutboundPush(storage)
 
 	reqPayload := OutboundPushRequest{
-		RemoteHost: "127.0.0.1:2222",
-		Username:   "partner",
-		Password:   "secret",
-		SourceKey:  "/out/invoice.csv",
-		TargetPath: "/inbound/invoice.csv",
+		RemoteHost:      "127.0.0.1:2222",
+		Username:        "partner",
+		Password:        "secret",
+		SourceKey:       "/out/invoice.csv",
+		TargetPath:      "/inbound/invoice.csv",
+		ExpectedHostKey: "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC3",
 	}
 
 	body, _ := json.Marshal(reqPayload)
@@ -61,5 +62,28 @@ func TestHandleOutboundPush_MethodNotAllowed(t *testing.T) {
 
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Errorf("Expected 405 Method Not Allowed, got %d", rec.Code)
+	}
+}
+
+func TestHandleOutboundPush_MissingHostKey(t *testing.T) {
+	handler := HandleOutboundPush(&storage.MockStorageProvider{})
+
+	// Payload deliberately missing ExpectedHostKey
+	reqPayload := OutboundPushRequest{
+		RemoteHost: "127.0.0.1:2222",
+		Username:   "partner",
+		Password:   "secret",
+		SourceKey:  "/out/invoice.csv",
+		TargetPath: "/inbound/invoice.csv",
+	}
+
+	body, _ := json.Marshal(reqPayload)
+	req := httptest.NewRequest("POST", "/api/v1/sftp/push", bytes.NewBuffer(body))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Expected status code 400 Bad Request for missing host key, got %d", rec.Code)
 	}
 }

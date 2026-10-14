@@ -50,6 +50,49 @@ func TestInitStorageProvider_DefaultFallback(t *testing.T) {
 	}
 }
 
+func TestInitStorageProvider_GCSDriver(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Storage.Driver = "gcs"
+	// GCS requires a credentials file or it errors out
+	cfg.Storage.GCS.CredentialsFile = "dummy.json"
+
+	// It's expected to fail if the dummy file doesn't exist,
+	// but we just want to ensure it routes to the right provider logic.
+	_, err := initStorageProvider(context.Background(), cfg)
+	if err == nil {
+		t.Errorf("Expected error due to missing dummy.json, got nil")
+	}
+}
+
+func TestInitStorageProvider_AzureDriver(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Storage.Driver = "azure"
+	cfg.Storage.Azure.AccountName = "devstoreaccount1"
+	cfg.Storage.Azure.AccountKey = "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw=="
+
+	provider, err := initStorageProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error for Azure driver: %v", err)
+	}
+	if _, ok := provider.(*storage.AzureProvider); !ok {
+		t.Errorf("Expected AzureProvider, got %T", provider)
+	}
+}
+
+func TestInitStorageProvider_DiskDriver(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Storage.Driver = "disk"
+	cfg.Storage.Disk.BasePath = "/tmp/hook22"
+
+	provider, err := initStorageProvider(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error for Disk driver: %v", err)
+	}
+	if _, ok := provider.(*storage.DiskProvider); !ok {
+		t.Errorf("Expected DiskProvider, got %T", provider)
+	}
+}
+
 func TestHandleLogStream_SSEHeaders(t *testing.T) {
 	broadcaster := observability.NewLogBroadcaster()
 	handler := handleLogStream(broadcaster)

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"cloud.google.com/go/storage"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob"
@@ -132,7 +133,12 @@ type GCSProvider struct {
 }
 
 func NewGCSProvider(ctx context.Context, cfg *config.Config) (*GCSProvider, error) {
-	client, err := storage.NewClient(ctx, option.WithCredentialsFile(cfg.Storage.GCS.CredentialsFile))
+	// Explicitly validate that the credentials file is a Service Account key
+	client, err := storage.NewClient(ctx, option.WithAuthCredentialsFile(
+		option.ServiceAccount,
+		cfg.Storage.GCS.CredentialsFile,
+	))
+
 	if err != nil {
 		return nil, fmt.Errorf("failed to create GCS client: %w", err)
 	}
@@ -238,12 +244,40 @@ func NewDiskProvider(cfg *config.Config) *DiskProvider {
 	return &DiskProvider{cfg: cfg}
 }
 
-func (d *DiskProvider) Upload(ctx context.Context, reqPath string, r io.Reader) (string, int64, error) {
+func (d *DiskProvider) secureFullPath(reqPath string) (string, error) {
 	if d.cfg.Storage.Disk.BasePath == "" {
-		return "", 0, fmt.Errorf("disk base_path is not configured")
+		return "", fmt.Errorf("disk base_path is not configured")
 	}
 
-	fullPath := filepath.Join(d.cfg.Storage.Disk.BasePath, reqPath)
+	// Get the absolute path of the configured base directory
+	baseAbs, err := filepath.Abs(d.cfg.Storage.Disk.BasePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve absolute base path: %w", err)
+	}
+
+	// Clean the requested path to resolve any ../ segments
+	cleanReq := filepath.Clean(reqPath)
+	if len(cleanReq) > 0 && cleanReq[0] == '/' {
+		cleanReq = cleanReq[1:] // Strip leading slash so it joins correctly as a relative child
+	}
+
+	// Join and get the absolute path of the target file
+	fullPath := filepath.Join(baseAbs, cleanReq)
+
+	// SECURITY: Ensure the final path is strictly inside the base directory
+	if !strings.HasPrefix(fullPath, baseAbs+string(filepath.Separator)) && fullPath != baseAbs {
+		return "", fmt.Errorf("path traversal denied: %s", reqPath)
+	}
+
+	return fullPath, nil
+}
+
+func (d *DiskProvider) Upload(ctx context.Context, reqPath string, r io.Reader) (string, int64, error) {
+	fullPath, err := d.secureFullPath(reqPath)
+	if err != nil {
+		return "", 0, err
+	}
+
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return "", 0, fmt.Errorf("failed to create directory structure: %w", err)
 	}
@@ -267,11 +301,11 @@ func (d *DiskProvider) Upload(ctx context.Context, reqPath string, r io.Reader) 
 }
 
 func (d *DiskProvider) Download(ctx context.Context, reqPath string) (io.ReadCloser, error) {
-	if d.cfg.Storage.Disk.BasePath == "" {
-		return nil, fmt.Errorf("disk base_path is not configured")
+	fullPath, err := d.secureFullPath(reqPath)
+	if err != nil {
+		return nil, err
 	}
 
-	fullPath := filepath.Join(d.cfg.Storage.Disk.BasePath, reqPath)
 	file, err := os.Open(fullPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open file on disk: %w", err)

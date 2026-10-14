@@ -1,7 +1,8 @@
 server:
   port: 2222
   host_key_path: "./keys/host_rsa"
-
+  session_secret: "REPLACE_ME_WITH_A_SECURE_RANDOM_STRING"
+  
 storage:
   driver: "s3" # Options: mock, s3, gcs, azure
   s3:
@@ -18,4 +19,5 @@ webhook:
 # Hardcoded users for Open-Source mode (Control Plane API will replace this in Enterprise)
 users:
   - username: "acme_corp"
-    password: "password"
+    # Bcrypt hash of "password"
+    password: "$2a$10$G3O... (insert your valid hash here)"

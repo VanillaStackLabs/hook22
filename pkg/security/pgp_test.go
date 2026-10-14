@@ -10,10 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/crypto/openpgp"
-	"golang.org/x/crypto/openpgp/armor"
-	"golang.org/x/crypto/openpgp/packet"
-	_ "golang.org/x/crypto/ripemd160"
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp/packet"
 )
 
 func createTestPGPKey(t *testing.T, dir string) (*openpgp.Entity, string) {
@@ -145,5 +144,30 @@ func TestDecryptStreamReader_NonExistentKeyFile(t *testing.T) {
 	_, err := DecryptStreamReader(inR, "/non/existent/path/key.pgp", "")
 	if err == nil {
 		t.Error("Expected error for non-existent key file, got nil")
+	}
+}
+
+func TestDecryptStreamReader_TamperedCiphertext(t *testing.T) {
+	defer ResetCache()
+	tmpDir := t.TempDir()
+	entity, keyPath := createTestPGPKey(t, tmpDir)
+
+	rawPlaintext := []byte("Sensitive payload that will be tampered with")
+	ciphertext := encryptTestPayload(t, entity, rawPlaintext, false)
+
+	// Tamper with the ciphertext (flip a bit in the encrypted payload)
+	// OpenPGP packets usually have header bytes, so flipping a byte near the end affects the encrypted data/MDC.
+	ciphertext[len(ciphertext)-5] ^= 0xFF
+
+	inR := bytes.NewReader(ciphertext)
+	decR, err := DecryptStreamReader(inR, keyPath, "")
+	if err != nil {
+		t.Fatalf("Failed to initialize DecryptStreamReader: %v", err)
+	}
+
+	// ReadAll should fail at EOF when the MDC signature check occurs
+	_, err = io.ReadAll(decR)
+	if err == nil {
+		t.Fatal("Expected decryption to fail due to tampered ciphertext/MDC error, but it succeeded")
 	}
 }

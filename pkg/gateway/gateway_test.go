@@ -3,9 +3,12 @@ package gateway
 import (
 	"bytes"
 	"io"
+	"os"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pkg/sftp"
 )
 
 func TestS3StreamWriter_OutOfOrderChunks(t *testing.T) {
@@ -125,8 +128,8 @@ func TestS3StreamWriter_Backpressure(t *testing.T) {
 	writer.WriteAt(chunk2, 5)
 
 	blockedWriteDone := make(chan struct{})
-	
-	// Write chunk 3 in a goroutine. This SHOULD block because capacity is full 
+
+	// Write chunk 3 in a goroutine. This SHOULD block because capacity is full
 	// and we are still waiting for chunk 1 (offset 0).
 	go func() {
 		writer.WriteAt(chunk3, 10)
@@ -152,6 +155,67 @@ func TestS3StreamWriter_Backpressure(t *testing.T) {
 	case <-time.After(500 * time.Millisecond):
 		t.Fatal("WriteAt for chunk 3 is permanently stuck, spaceCond.Broadcast() failed")
 	}
-	
+
 	pipeW.Close()
+}
+
+func TestS3StreamWriter_CloseWithOrphanedChunks(t *testing.T) {
+	pipeR, pipeW := io.Pipe()
+	doneChan := make(chan uploadResult, 1)
+
+	writer := &s3StreamWriter{
+		filepath:         "/test.csv",
+		username:         "testuser",
+		pipeW:            pipeW,
+		doneChan:         doneChan,
+		pendingChunks:    make(map[int64][]byte),
+		maxPendingChunks: 10,
+	}
+	writer.spaceCond = sync.NewCond(&writer.mu)
+
+	// Simulate background storage consumer
+	go func() {
+		io.Copy(io.Discard, pipeR)
+		doneChan <- uploadResult{err: nil} // Storage thinks it finished cleanly
+	}()
+
+	// Write Chunk 2 (offset 10) WITHOUT writing Chunk 1 (offset 0)
+	chunk2 := []byte("WORLD_12345")
+	writer.WriteAt(chunk2, 10)
+
+	// Call Close while Chunk 2 is stranded in pendingChunks waiting for offset 0
+	err := writer.Close()
+	if err == nil {
+		t.Fatal("Expected Close() to return an error for orphaned chunks, got nil")
+	}
+
+	expectedErrMsg := "stream closed prematurely with 1 unwritten chunks"
+	if err.Error() != expectedErrMsg {
+		t.Errorf("Expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+}
+
+func TestGatewayHandler_Filelist_Readme(t *testing.T) {
+	handler := &gatewayHandler{}
+
+	// Test standard directory listing
+	req := &sftp.Request{Method: "List", Filepath: "/drops"}
+	lister, err := handler.Filelist(req)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	// Fetch up to 10 entries from the lister
+	fileInfos := make([]os.FileInfo, 10)
+	n, _ := lister.ListAt(fileInfos, 0)
+
+	if n != 1 {
+		t.Fatalf("Expected exactly 1 virtual file in directory, got %d", n)
+	}
+	if fileInfos[0].Name() != "README_WRITE_ONLY_DROP.txt" {
+		t.Errorf("Expected README_WRITE_ONLY_DROP.txt, got %s", fileInfos[0].Name())
+	}
+	if fileInfos[0].IsDir() {
+		t.Error("Expected virtual README to be a file, not a directory")
+	}
 }

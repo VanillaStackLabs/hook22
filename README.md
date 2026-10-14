@@ -123,9 +123,27 @@ webhook:
 
 users:
   - username: "e2e_user"
-    password: "e2e_password"
+    password: "$2a$10$vI8aWBnP/ewO94vkPRzqAeK/26dZcE8Q.3v.rQ4d4L3Xp/u.Y9h2a"
     public_keys:
       - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ..."
+```
+
+---
+
+### Generating Secure Passwords
+
+For security, Hook22 requires passwords in `config.yaml` to be bcrypt hashes rather than plaintext. The gateway binary includes a built-in helper to generate these hashes for you.
+
+If you are running the gateway via Docker, you can generate a hash for a new password on the fly:
+
+```bash
+docker exec -it sftp-gateway /sftp-webhook-gateway hash "my_secure_password"
+```
+
+#### Output:
+```
+Bcrypt hash for config.yaml:
+$2a$10$YourGeneratedBcryptHashStringHere...
 ```
 
 ---

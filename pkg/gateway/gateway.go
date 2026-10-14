@@ -243,7 +243,12 @@ func (h *gatewayHandler) Filelist(req *sftp.Request) (sftp.ListerAt, error) {
 	case "Stat", "Lstat":
 		return listerAt([]os.FileInfo{&virtualFileInfo{name: filepath.Base(req.Filepath), isDir: true}}), nil
 	default:
-		return listerAt([]os.FileInfo{}), nil
+		// Inject a helpful virtual README so the directory doesn't look broken
+		readme := &virtualFileInfo{
+			name:  "README_WRITE_ONLY_DROP.txt",
+			isDir: false,
+		}
+		return listerAt([]os.FileInfo{readme}), nil
 	}
 }
 

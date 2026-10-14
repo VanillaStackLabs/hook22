@@ -16,6 +16,7 @@ import (
 	"github.com/VanillaStackLabs/hook22/pkg/storage"
 	"github.com/VanillaStackLabs/hook22/pkg/webhook"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func initStorageProvider(ctx context.Context, cfg *config.Config) (storage.StorageProvider, error) {
@@ -37,6 +38,16 @@ func initStorageProvider(ctx context.Context, cfg *config.Config) (storage.Stora
 }
 
 func main() {
+	if len(os.Args) >= 3 && os.Args[1] == "hash" {
+		hash, err := bcrypt.GenerateFromPassword([]byte(os.Args[2]), bcrypt.DefaultCost)
+		if err != nil {
+			fmt.Printf("Error generating hash: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Bcrypt hash for config.yaml:\n%s\n", string(hash))
+		os.Exit(0)
+	}
+	
 	broadcaster := observability.NewLogBroadcaster()
 	logger := slog.New(slog.NewJSONHandler(broadcaster, nil))
 	slog.SetDefault(logger)
@@ -47,9 +58,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Fallback Session Secret so JWT signing never panics or returns 500
+	// Require sessionsecret
 	if cfg.Server.SessionSecret == "" {
-		cfg.Server.SessionSecret = "dev_fallback_jwt_secret_key_12345"
+		slog.Error("CRITICAL: server.session_secret is empty in config.yaml. Refusing to start insecurely.")
+		os.Exit(1)
 	}
 
 	webhook.InitWebhookDispatcher(cfg)

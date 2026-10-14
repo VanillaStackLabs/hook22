@@ -37,6 +37,16 @@ func HandleOutboundPush(storage storage.StorageProvider) http.HandlerFunc {
 			return
 		}
 
+		// Synchronous validation before queueing
+		if req.RemoteHost == "" || req.Username == "" || req.SourceKey == "" || req.TargetPath == "" {
+			http.Error(w, "Missing required fields: remote_host, username, source_key, and target_remote_path are mandatory", http.StatusBadRequest)
+			return
+		}
+		if req.ExpectedHostKey == "" {
+			http.Error(w, "Missing expected_host_key. Outbound connections require strict server identity verification.", http.StatusBadRequest)
+			return
+		}
+
 		go asyncOutboundPush(req, storage)
 
 		w.Header().Set("Content-Type", "application/json")
@@ -46,6 +56,7 @@ func HandleOutboundPush(storage storage.StorageProvider) http.HandlerFunc {
 			"target":  req.TargetPath,
 			"partner": req.RemoteHost,
 		})
+
 	}
 }
 

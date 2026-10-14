@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"github.com/VanillaStackLabs/hook22/pkg/observability"
@@ -85,11 +86,16 @@ func (s *GatewayServer) Shutdown() {
 }
 
 func (s *GatewayServer) handleConnection(conn net.Conn) {
+	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+
 	sshConn, chans, reqs, err := ssh.NewServerConn(conn, s.sshConfig)
 	if err != nil {
 		slog.Warn("SSH handshake failed", "event", "ssh.handshake_failed", "remote_addr", conn.RemoteAddr().String(), "error", err.Error())
 		return
 	}
+
+	// Clear deadline after successful handshake
+	_ = conn.SetDeadline(time.Time{})
 
 	observability.ActiveSSHSessions.Inc()
 	defer observability.ActiveSSHSessions.Dec()
@@ -114,7 +120,12 @@ func (s *GatewayServer) handleConnection(conn net.Conn) {
 			defer ch.Close()
 
 			for req := range in {
-				if req.Type == "subsystem" && string(req.Payload[4:]) == "sftp" {
+				// Safely parse the subsystem request payload
+				var sub struct {
+					Subsystem string
+				}
+
+				if req.Type == "subsystem" && ssh.Unmarshal(req.Payload, &sub) == nil && sub.Subsystem == "sftp" {
 					req.Reply(true, nil)
 
 					handler := &gatewayHandler{

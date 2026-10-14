@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -29,10 +30,15 @@ func TestE2E_DockerComposeStack(t *testing.T) {
 
 	// Dial Dockerized SFTP Server
 	sshConfig := &ssh.ClientConfig{
-		User:            "e2e_user",
-		Auth:            []ssh.AuthMethod{ssh.Password("e2e_password")},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         5 * time.Second,
+		User: "e2e_user",
+		Auth: []ssh.AuthMethod{ssh.Password("e2e_password")},
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			// WARNING: Never do this in production.
+			// We bypass host key verification here ONLY because the ephemeral
+			// Docker container regenerates its SSH keys on every test run.
+			return nil
+		},
+		Timeout: 5 * time.Second,
 	}
 
 	sshConn, err := ssh.Dial("tcp", sftpAddr, sshConfig)

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/VanillaStackLabs/hook22/pkg/config"
 )
@@ -61,7 +62,7 @@ func TestTriggerWebhook_PayloadAndSignature(t *testing.T) {
 		Attempts: 0,
 	}
 
-	dispatchWithRetry(task, cfg, http.DefaultClient)
+	dispatchAsync(task, cfg, http.DefaultClient)
 
 	// Verify JSON Payload
 	var payload WebhookPayload
@@ -114,25 +115,30 @@ func TestTriggerWebhook_RetryMechanismOnFailure(t *testing.T) {
 			Secret:      secret,
 			Workers:     1,
 			MaxRetries:  3,
-			BaseBackoff: 1,
+			BaseBackoff: 1, // Minimum 1 second backoff
 		},
 	}
 
-	task := WebhookTask{
-		Payload: WebhookPayload{
-			Event:     "file.uploaded",
-			Username:  "acme_corp",
-			Filepath:  "/test.csv",
-			SizeBytes: 100,
-			SHA256:    "abc",
-			Status:    "success",
-		},
-		Attempts: 0,
+	// Initialize the dispatcher so the memory queue and async workers are active
+	InitWebhookDispatcher(cfg)
+	defer func() {
+		globalDispatcher.Shutdown()
+		globalDispatcher = nil // Prevent state leakage to other tests
+	}()
+
+	// Push the event into the pipeline
+	TriggerWebhook("/test.csv", "acme_corp", "abc", 100, cfg)
+
+	// Poll for up to 5 seconds to allow the async jittered retries to execute
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&attempts) >= 3 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
 
-	dispatchWithRetry(task, cfg, http.DefaultClient)
-
-	if atomic.LoadInt32(&attempts) != 3 {
-		t.Errorf("Expected 3 delivery attempts, got %d", attempts)
+	if finalAttempts := atomic.LoadInt32(&attempts); finalAttempts != 3 {
+		t.Errorf("Expected 3 delivery attempts, got %d", finalAttempts)
 	}
 }

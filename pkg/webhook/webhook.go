@@ -126,7 +126,7 @@ func TriggerWebhook(filepath, username, hash string, size int64, cfg *config.Con
 	}
 
 	if globalDispatcher == nil {
-		dispatchWithRetry(task, cfg, &http.Client{Timeout: 10 * time.Second})
+		dispatchAsync(task, cfg, &http.Client{Timeout: 10 * time.Second})
 		return
 	}
 
@@ -178,7 +178,7 @@ func (d *WebhookDispatcher) memoryWorker(id int) {
 	defer d.wg.Done()
 	slog.Debug("Starting memory webhook worker", "worker_id", id)
 	for task := range d.taskQueue {
-		dispatchWithRetry(task, d.cfg, d.client)
+		dispatchAsync(task, d.cfg, d.client)
 	}
 }
 
@@ -216,13 +216,8 @@ func (d *WebhookDispatcher) rabbitWorker(id int) {
 			msg.Nack(false, false)
 			continue
 		}
-
-		success := dispatchWithRetry(task, d.cfg, d.client)
-		if success {
-			msg.Ack(false)
-		} else {
-			msg.Ack(false)
-		}
+		dispatchAsync(task, d.cfg, d.client)
+		msg.Ack(false)
 	}
 }
 
@@ -240,69 +235,81 @@ func (d *WebhookDispatcher) Shutdown() {
 	d.wg.Wait()
 }
 
-func dispatchWithRetry(task WebhookTask, cfg *config.Config, client *http.Client) bool {
+func dispatchAsync(task WebhookTask, cfg *config.Config, client *http.Client) {
+	task.Attempts++
+
 	body, err := json.Marshal(task.Payload)
 	if err != nil {
 		slog.Error("Failed to marshal webhook payload", "event", "webhook.marshal_error", "error", err.Error())
-		return false
+		return
 	}
 
 	mac := hmac.New(sha256.New, []byte(cfg.Webhook.Secret))
 	mac.Write(body)
 	signature := fmt.Sprintf("v1=%s", hex.EncodeToString(mac.Sum(nil)))
 
+	req, err := http.NewRequest("POST", cfg.Webhook.URL, bytes.NewBuffer(body))
+	if err != nil {
+		slog.Error("Webhook request creation failed", "event", "webhook.request_error", "error", err.Error())
+		return
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Hook22-Signature", signature)
+
 	maxRetries := cfg.Webhook.MaxRetries
 	if maxRetries <= 0 {
 		maxRetries = 5
 	}
 
+	slog.Info("Attempting webhook delivery", "event", "webhook.attempt", "filepath", task.Payload.Filepath, "attempt", task.Attempts, "max_attempts", maxRetries)
+	resp, err := client.Do(req)
+
+	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		resp.Body.Close()
+		slog.Info("Webhook delivered successfully", "event", "webhook.delivered", "filepath", task.Payload.Filepath)
+		observability.WebhookDeliveriesTotal.WithLabelValues("success").Inc()
+		return
+	}
+
+	if err != nil {
+		slog.Warn("Webhook delivery network error", "event", "webhook.network_error", "error", err.Error())
+	} else {
+		resp.Body.Close()
+		slog.Warn("Webhook target returned non-2xx status", "event", "webhook.http_error", "status_code", resp.StatusCode)
+	}
+
+	if task.Attempts >= maxRetries {
+		slog.Error("Webhook delivery exhausted max retries, dropping event", "filepath", task.Payload.Filepath)
+		observability.WebhookDeliveriesTotal.WithLabelValues("failure").Inc()
+		return
+	}
+
+	// Calculate exponential backoff and schedule non-blocking retry
 	baseBackoff := cfg.Webhook.BaseBackoff
 	if baseBackoff <= 0 {
 		baseBackoff = 2
 	}
+	tempBackoff := float64(baseBackoff) * math.Pow(2, float64(task.Attempts-1))
+	jitterSleep := time.Duration(rand.Float64() * math.Min(300.0, tempBackoff) * float64(time.Second))
 
-	for task.Attempts < maxRetries {
-		task.Attempts++
+	slog.Info("Scheduling async webhook retry", "filepath", task.Payload.Filepath, "backoff", jitterSleep.String())
 
-		req, err := http.NewRequest("POST", cfg.Webhook.URL, bytes.NewBuffer(body))
-		if err != nil {
-			slog.Error("Webhook request creation failed", "event", "webhook.request_error", "error", err.Error())
-			return false
+	time.AfterFunc(jitterSleep, func() {
+		if globalDispatcher == nil {
+			return
 		}
-
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Hook22-Signature", signature)
-
-		slog.Info("Attempting webhook delivery", "event", "webhook.attempt", "filepath", task.Payload.Filepath, "attempt", task.Attempts, "max_attempts", maxRetries)
-
-		resp, err := client.Do(req)
-		if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
-			resp.Body.Close()
-			slog.Info("Webhook delivered successfully", "event", "webhook.delivered", "filepath", task.Payload.Filepath, "status_code", resp.StatusCode)
-			observability.WebhookDeliveriesTotal.WithLabelValues("success").Inc()
-			return true
-		}
-
-		if err != nil {
-			slog.Warn("Webhook delivery network error", "event", "webhook.network_error", "error", err.Error(), "attempt", task.Attempts)
+		if globalDispatcher.useRabbit {
+			retryBody, _ := json.Marshal(task)
+			globalDispatcher.pubMu.Lock()
+			_ = globalDispatcher.amqpChan.Publish("", cfg.RabbitMQ.QueueName, false, false, amqp.Publishing{
+				DeliveryMode: amqp.Persistent,
+				ContentType:  "application/json",
+				Body:         retryBody,
+			})
+			globalDispatcher.pubMu.Unlock()
 		} else {
-			resp.Body.Close()
-			slog.Warn("Webhook target returned non-2xx status", "event", "webhook.http_error", "status_code", resp.StatusCode, "attempt", task.Attempts)
+			globalDispatcher.taskQueue <- task
 		}
-
-		if task.Attempts >= maxRetries {
-			slog.Error("Webhook delivery exhausted max retries, dropping event", "event", "webhook.exhausted", "filepath", task.Payload.Filepath, "total_attempts", task.Attempts)
-			observability.WebhookDeliveriesTotal.WithLabelValues("failure").Inc()
-			return false
-		}
-
-		tempBackoff := float64(baseBackoff) * math.Pow(2, float64(task.Attempts-1))
-		maxSleep := math.Min(300.0, tempBackoff)
-		jitterSleep := time.Duration(rand.Float64() * maxSleep * float64(time.Second))
-
-		slog.Info("Scheduling webhook retry", "event", "webhook.retry_scheduled", "filepath", task.Payload.Filepath, "backoff", jitterSleep.String())
-		time.Sleep(jitterSleep)
-	}
-
-	return false
+	})
 }

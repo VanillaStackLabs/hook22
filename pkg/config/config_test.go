@@ -58,6 +58,35 @@ users:
 	}
 }
 
+func TestLoadConfig_DefaultsApplied(t *testing.T) {
+	content := []byte(`
+server:
+  port: 2222
+storage:
+  driver: "mock"
+`)
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config_defaults.yaml")
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		t.Fatalf("Failed to write temp config: %v", err)
+	}
+
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		t.Fatalf("Expected no error, got %v", err)
+	}
+
+	if cfg.Webhook.Workers != 5 {
+		t.Errorf("Expected default Workers to be 5, got %d", cfg.Webhook.Workers)
+	}
+	if cfg.Webhook.MaxRetries != 5 {
+		t.Errorf("Expected default MaxRetries to be 5, got %d", cfg.Webhook.MaxRetries)
+	}
+	if cfg.Webhook.BaseBackoff != 2 {
+		t.Errorf("Expected default BaseBackoff to be 2, got %d", cfg.Webhook.BaseBackoff)
+	}
+}
+
 func TestLoadConfig_FileNotFound(t *testing.T) {
 	_, err := LoadConfig("non_existent_file.yaml")
 	if err == nil {
