@@ -12,13 +12,13 @@ services:
     volumes:
       - ./config.yaml:/config.yaml:ro
       - ./keys:/keys:ro
-      
       # Uncomment if using Google Cloud Storage (GCS) driver:
       # - ./gcp-creds.json:/gcp-creds.json:ro
-      
-      # Uncomment if using Local Disk driver (ensure base_path: "/data" is set in config.yaml):
+      # Uncomment if using Local Disk driver:
       # - ./data:/data
-      
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
     logging:
       driver: "json-file"
       options:
@@ -30,3 +30,25 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: rabbitmq-broker
+    restart: unless-stopped
+    ports:
+      - "5672:5672"   # AMQP Protocol
+      - "15672:15672" # Web Management Dashboard
+    environment:
+      # IMPORTANT: Change these in production!
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  rabbitmq_data:
