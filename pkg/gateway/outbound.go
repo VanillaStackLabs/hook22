@@ -16,11 +16,12 @@ import (
 var asyncOutboundPush = executeOutboundPush
 
 type OutboundPushRequest struct {
-	RemoteHost string `json:"remote_host"` // e.g. "sftp.partner.com:22"
-	Username   string `json:"username"`
-	Password   string `json:"password"`
-	SourceKey  string `json:"source_key"`
-	TargetPath string `json:"target_remote_path"`
+	RemoteHost      string `json:"remote_host"` // e.g. "sftp.partner.com:22"
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	SourceKey       string `json:"source_key"`
+	TargetPath      string `json:"target_remote_path"`
+	ExpectedHostKey string `json:"expected_host_key,omitempty"`
 }
 
 func HandleOutboundPush(storage storage.StorageProvider) http.HandlerFunc {
@@ -63,14 +64,30 @@ func executeOutboundPush(req OutboundPushRequest, storage storage.StorageProvide
 	defer srcStream.Close()
 
 	// Dial remote SSH server
+	// Dial remote SSH server
+	var hostKeyCallback ssh.HostKeyCallback
+
+	if req.ExpectedHostKey != "" {
+		pubKey, _, _, _, err := ssh.ParseAuthorizedKey([]byte(req.ExpectedHostKey))
+		if err != nil {
+			slog.Error("Invalid expected host key format", "error", err.Error())
+			return
+		}
+		hostKeyCallback = ssh.FixedHostKey(pubKey)
+	} else {
+		slog.Error("Outbound push failed: missing expected_host_key to verify server identity")
+		return
+	}
+
 	sshConfig := &ssh.ClientConfig{
 		User:            req.Username,
 		Auth:            []ssh.AuthMethod{ssh.Password(req.Password)},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: hostKeyCallback,
 		Timeout:         10 * time.Second,
 	}
 
 	conn, err := ssh.Dial("tcp", req.RemoteHost, sshConfig)
+
 	if err != nil {
 		slog.Error("Outbound push failed: SSH dial error", "event", "sftp.outbound_dial_error", "error", err.Error())
 		return
