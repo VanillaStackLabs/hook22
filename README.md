@@ -2,8 +2,7 @@
 
 ![Go Version](https://img.shields.io/badge/go-1.27+-00ADD8?style=flat-square&logo=go)
 ![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED?style=flat-square&logo=docker)
-![License](https://img.shields.io/badge/license-Open--Core-emerald?style=flat-square)
-![Architecture](https://img.shields.io/badge/architecture-Zero--Disk%20Stream-purple?style=flat-square)
+![License](https://img.shields.io/badge/license-Apache%202.0-blue?style=flat-square)
 
 **Hook22** is an open-core, high-performance SFTP-to-Webhook gateway designed for enterprise B2B data integrations. It bridges legacy SFTP file transfers with modern REST/API infrastructure through zero-disk streaming into cloud storage, in-flight OpenPGP decryption, dynamic multi-tenant authentication, and bi-directional outbound file pushes.
 
