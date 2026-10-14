@@ -6,16 +6,47 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
-	"golang.org/x/crypto/openpgp"
-	"golang.org/x/crypto/openpgp/armor"
+	"github.com/ProtonMail/go-crypto/openpgp"
+	"github.com/ProtonMail/go-crypto/openpgp/armor"
 )
 
-// DecryptStreamReader takes an encrypted reader and decrypts it using the private key at keyPath.
-// Supports both raw binary and ASCII-armored OpenPGP encrypted streams.
-func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Reader, error) {
-	if keyPath == "" {
-		return nil, fmt.Errorf("PGP private key path is not configured")
+var (
+	cachedEntityList openpgp.EntityList
+	keyMu            sync.RWMutex
+)
+
+// verifiedReader wraps the unverified body and checks for signature/MDC errors at EOF
+type verifiedReader struct {
+	body io.Reader
+	md   *openpgp.MessageDetails
+}
+
+func (vr *verifiedReader) Read(p []byte) (int, error) {
+	n, err := vr.body.Read(p)
+	if err == io.EOF {
+		if vr.md.SignatureError != nil {
+			return n, fmt.Errorf("PGP integrity check failed (tampered data): %w", vr.md.SignatureError)
+		}
+	}
+	return n, err
+}
+
+func getEntityList(keyPath, passphrase string) (openpgp.EntityList, error) {
+	keyMu.RLock()
+	if cachedEntityList != nil {
+		defer keyMu.RUnlock()
+		return cachedEntityList, nil
+	}
+	keyMu.RUnlock()
+
+	keyMu.Lock()
+	defer keyMu.Unlock()
+
+	// Double-checked locking
+	if cachedEntityList != nil {
+		return cachedEntityList, nil
 	}
 
 	keyFile, err := os.Open(keyPath)
@@ -24,7 +55,6 @@ func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Rea
 	}
 	defer keyFile.Close()
 
-	// Parse keyring (supports armored or raw binary)
 	entityList, err := openpgp.ReadArmoredKeyRing(keyFile)
 	if err != nil {
 		if _, seekErr := keyFile.Seek(0, 0); seekErr == nil {
@@ -35,7 +65,6 @@ func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Rea
 		}
 	}
 
-	// Decrypt encrypted private key and subkeys if passphrase is provided
 	if passphrase != "" {
 		passBytes := []byte(passphrase)
 		for _, entity := range entityList {
@@ -52,6 +81,21 @@ func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Rea
 				}
 			}
 		}
+	}
+
+	cachedEntityList = entityList
+	return cachedEntityList, nil
+}
+
+// DecryptStreamReader takes an encrypted reader and decrypts it using the private key at keyPath.
+func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Reader, error) {
+	if keyPath == "" {
+		return nil, fmt.Errorf("PGP private key path is not configured")
+	}
+
+	entityList, err := getEntityList(keyPath, passphrase)
+	if err != nil {
+		return nil, err
 	}
 
 	bufR := bufio.NewReader(r)
@@ -74,5 +118,8 @@ func DecryptStreamReader(r io.Reader, keyPath string, passphrase string) (io.Rea
 		return nil, fmt.Errorf("failed to decrypt OpenPGP message: %w", err)
 	}
 
-	return md.UnverifiedBody, nil
+	return &verifiedReader{
+		body: md.UnverifiedBody,
+		md:   md,
+	}, nil
 }

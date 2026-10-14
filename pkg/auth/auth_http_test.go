@@ -10,9 +10,13 @@ import (
 
 	"github.com/VanillaStackLabs/hook22/pkg/config"
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestHandleLogin_Success(t *testing.T) {
+	// Generate a valid bcrypt hash for the test
+	hashBytes, _ := bcrypt.GenerateFromPassword([]byte("testpassword"), bcrypt.DefaultCost)
+
 	cfg := &config.Config{}
 	cfg.Server.SessionSecret = "test_secret_123"
 	cfg.Users = []struct {
@@ -20,7 +24,7 @@ func TestHandleLogin_Success(t *testing.T) {
 		Password   string   `yaml:"password"`
 		PublicKeys []string `yaml:"public_keys"`
 	}{
-		{Username: "testuser", Password: "testpassword"},
+		{Username: "testuser", Password: string(hashBytes)},
 	}
 
 	payload := LoginRequest{Username: "testuser", Password: "testpassword"}
@@ -51,13 +55,15 @@ func TestHandleLogin_Success(t *testing.T) {
 }
 
 func TestHandleLogin_InvalidCredentials(t *testing.T) {
+	hashBytes, _ := bcrypt.GenerateFromPassword([]byte("testpassword"), bcrypt.DefaultCost)
+
 	cfg := &config.Config{}
 	cfg.Users = []struct {
 		Username   string   `yaml:"username"`
 		Password   string   `yaml:"password"`
 		PublicKeys []string `yaml:"public_keys"`
 	}{
-		{Username: "testuser", Password: "testpassword"},
+		{Username: "testuser", Password: string(hashBytes)},
 	}
 
 	payload := LoginRequest{Username: "testuser", Password: "wrongpassword"}

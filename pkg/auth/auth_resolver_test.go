@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -80,5 +82,43 @@ func TestHTTPControlPlaneResolver_AuthenticatePublicKey(t *testing.T) {
 	}
 	if perms.AllowedStorageBucket != "key-bucket" {
 		t.Errorf("Expected bucket key-bucket, got %s", perms.AllowedStorageBucket)
+	}
+}
+
+func TestVerifyPasswordAuth_StaticBcrypt(t *testing.T) {
+	password := "secure_password_123"
+	hashBytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatalf("Failed to generate bcrypt hash: %v", err)
+	}
+
+	cfg := &config.Config{}
+	cfg.Users = []struct {
+		Username   string   `yaml:"username"`
+		Password   string   `yaml:"password"`
+		PublicKeys []string `yaml:"public_keys"`
+	}{
+		{Username: "static_user", Password: string(hashBytes)},
+	}
+
+	// Test Success
+	method, perms := VerifyPasswordAuth(cfg, nil, "static_user", password)
+	if method != "static_password" {
+		t.Errorf("Expected method 'static_password', got '%s'", method)
+	}
+	if perms != nil {
+		t.Error("Expected nil permissions for static user")
+	}
+
+	// Wrong Password
+	badMethod, _ := VerifyPasswordAuth(cfg, nil, "static_user", "wrong_password")
+	if badMethod != "" {
+		t.Errorf("Expected empty method for wrong password, got '%s'", badMethod)
+	}
+
+	// Wrong User
+	badUserMethod, _ := VerifyPasswordAuth(cfg, nil, "unknown_user", password)
+	if badUserMethod != "" {
+		t.Errorf("Expected empty method for unknown user, got '%s'", badUserMethod)
 	}
 }

@@ -85,7 +85,16 @@ func encryptTestPayload(t *testing.T, entity *openpgp.Entity, plaintext []byte, 
 	return buf.Bytes()
 }
 
+// ResetCache is used for testing purposes to clear the memory cache.
+func ResetCache() {
+	keyMu.Lock()
+	defer keyMu.Unlock()
+	cachedEntityList = nil
+}
+
 func TestDecryptStreamReader_ArmoredAndBinary(t *testing.T) {
+	defer ResetCache() // Clear cache after test
+
 	tmpDir := t.TempDir()
 	entity, keyPath := createTestPGPKey(t, tmpDir)
 
@@ -122,6 +131,7 @@ func TestDecryptStreamReader_ArmoredAndBinary(t *testing.T) {
 }
 
 func TestDecryptStreamReader_MissingKeyPath(t *testing.T) {
+	defer ResetCache()
 	inR := bytes.NewReader([]byte("test"))
 	_, err := DecryptStreamReader(inR, "", "")
 	if err == nil {
@@ -130,6 +140,7 @@ func TestDecryptStreamReader_MissingKeyPath(t *testing.T) {
 }
 
 func TestDecryptStreamReader_NonExistentKeyFile(t *testing.T) {
+	defer ResetCache()
 	inR := bytes.NewReader([]byte("test"))
 	_, err := DecryptStreamReader(inR, "/non/existent/path/key.pgp", "")
 	if err == nil {
