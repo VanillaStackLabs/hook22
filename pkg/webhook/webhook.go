@@ -41,6 +41,7 @@ type WebhookDispatcher struct {
 	amqpConn  *amqp.Connection
 	amqpChan  *amqp.Channel
 	wg        sync.WaitGroup
+	pubMu     sync.Mutex
 	useRabbit bool
 }
 
@@ -142,6 +143,7 @@ func TriggerWebhook(filepath, username, hash string, size int64, cfg *config.Con
 		}
 
 		// Publish persistent message
+		globalDispatcher.pubMu.Lock()
 		err = globalDispatcher.amqpChan.Publish(
 			"",        // exchange
 			queueName, // routing key
@@ -153,6 +155,7 @@ func TriggerWebhook(filepath, username, hash string, size int64, cfg *config.Con
 				Body:         body,
 			},
 		)
+		globalDispatcher.pubMu.Unlock()
 		if err != nil {
 			slog.Error("Failed to publish webhook task to RabbitMQ", "event", "rabbitmq.publish_error", "error", err.Error())
 			observability.WebhookDeliveriesTotal.WithLabelValues("dropped_rabbitmq_error").Inc()
@@ -183,19 +186,23 @@ func (d *WebhookDispatcher) rabbitWorker(id int) {
 	defer d.wg.Done()
 	slog.Debug("Starting RabbitMQ webhook worker", "worker_id", id)
 
+	// Create a dedicated, thread-safe AMQP channel per worker
+	ch, err := d.amqpConn.Channel()
+	if err != nil {
+		slog.Error("Failed to open dedicated RabbitMQ channel for worker", "worker_id", id, "error", err.Error())
+		return
+	}
+	defer ch.Close()
+
 	queueName := d.cfg.RabbitMQ.QueueName
 	if queueName == "" {
 		queueName = "hook22_webhooks"
 	}
 
-	msgs, err := d.amqpChan.Consume(
+	msgs, err := ch.Consume(
 		queueName,
 		fmt.Sprintf("hook22-worker-%d", id),
-		false, // auto-ack = FALSE (manual acknowledgment guarantees no message loss)
-		false, // exclusive
-		false, // no-local
-		false, // no-wait
-		nil,   // args
+		false, false, false, false, nil,
 	)
 	if err != nil {
 		slog.Error("RabbitMQ worker failed to start consuming", "worker_id", id, "error", err.Error())
@@ -206,15 +213,14 @@ func (d *WebhookDispatcher) rabbitWorker(id int) {
 		var task WebhookTask
 		if err := json.Unmarshal(msg.Body, &task); err != nil {
 			slog.Error("Malformed RabbitMQ task body, rejecting", "error", err.Error())
-			msg.Nack(false, false) // Reject without requeue
+			msg.Nack(false, false)
 			continue
 		}
 
 		success := dispatchWithRetry(task, d.cfg, d.client)
 		if success {
-			msg.Ack(false) // Confirm message delivery complete
+			msg.Ack(false)
 		} else {
-			// Delivery exhausted retries, acknowledge to remove from queue
 			msg.Ack(false)
 		}
 	}

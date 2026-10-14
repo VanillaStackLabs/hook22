@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 
 	"github.com/VanillaStackLabs/hook22/pkg/auth"
@@ -22,23 +21,11 @@ import (
 func initStorageProvider(ctx context.Context, cfg *config.Config) (storage.StorageProvider, error) {
 	switch cfg.Storage.Driver {
 	case "s3":
-		provider, err := storage.NewS3Provider(ctx, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("S3 initialization failed: %w", err)
-		}
-		return provider, nil
+		return storage.NewS3Provider(ctx, cfg)
 	case "gcs":
-		provider, err := storage.NewGCSProvider(ctx, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("GCS initialization failed: %w", err)
-		}
-		return provider, nil
+		return storage.NewGCSProvider(ctx, cfg)
 	case "azure":
-		provider, err := storage.NewAzureProvider(cfg)
-		if err != nil {
-			return nil, fmt.Errorf("Azure initialization failed: %w", err)
-		}
-		return provider, nil
+		return storage.NewAzureProvider(cfg)
 	case "disk":
 		return storage.NewDiskProvider(cfg), nil
 	case "mock":
@@ -60,6 +47,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Fallback Session Secret so JWT signing never panics or returns 500
+	if cfg.Server.SessionSecret == "" {
+		cfg.Server.SessionSecret = "dev_fallback_jwt_secret_key_12345"
+	}
+
 	webhook.InitWebhookDispatcher(cfg)
 	storageBackend, err := initStorageProvider(context.Background(), cfg)
 	if err != nil {
@@ -74,33 +66,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Start Server
+	// Start Gateway Server
 	server := gateway.NewGatewayServer(cfg, sshConfig, storageBackend)
 
-	// Mutex for config updates and reload callback for runtime driver swaps
-	var configMutex sync.RWMutex
-	reloadStorageBackend := func(updatedCfg *config.Config) error {
-		newBackend, err := initStorageProvider(context.Background(), updatedCfg)
-		if err != nil {
-			return fmt.Errorf("failed to re-initialize storage provider: %w", err)
-		}
-		server.SetStorage(newBackend)
-		slog.Info("Hot-reloaded storage driver", "driver", updatedCfg.Storage.Driver)
-		return nil
-	}
-
-	// HTTP Routes
+	// Clean Stateless HTTP Routes
 	http.Handle("/metrics", promhttp.Handler())
 	http.HandleFunc("/api/v1/login", auth.HandleLogin(cfg, nil))
 	http.HandleFunc("/api/v1/logs/stream", auth.RequireCookieAuth(cfg.Server.SessionSecret, handleLogStream(broadcaster)))
 	http.HandleFunc("/api/v1/sftp/push", auth.RequireCookieAuth(cfg.Server.SessionSecret, gateway.HandleOutboundPush(storageBackend)))
 
-	// Vault Configuration Endpoints
+	// Read-Only Vault Configuration Endpoint
 	http.HandleFunc("/api/v1/vaults", auth.RequireCookieAuth(cfg.Server.SessionSecret, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet {
 			gateway.HandleGetVaults(cfg)(w, r)
-		} else if r.Method == http.MethodPost || r.Method == http.MethodPut {
-			gateway.HandleUpdateVault(cfg, &configMutex, reloadStorageBackend)(w, r)
 		} else {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -116,15 +94,12 @@ func main() {
 		}
 	}()
 
-	// Block on OS Signal
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
 	slog.Info("Graceful shutdown initiated...", "event", "server.shutdown_start")
-
 	server.Shutdown()
-
 	slog.Info("Graceful shutdown complete. Exiting.", "event", "server.shutdown_complete")
 }
 
@@ -149,7 +124,10 @@ func handleLogStream(broadcaster *observability.LogBroadcaster) http.HandlerFunc
 			select {
 			case <-r.Context().Done():
 				return
-			case logBytes := <-clientChan:
+			case logBytes, ok := <-clientChan:
+				if !ok {
+					return // Prevents 100% CPU infinite loop when channel is closed
+				}
 				fmt.Fprintf(w, "data: %s\n\n", string(logBytes))
 				flusher.Flush()
 			}

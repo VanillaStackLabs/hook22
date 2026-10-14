@@ -1,6 +1,7 @@
 server:
   port: 2222
   host_key_path: "./keys/host_rsa"
+  session_secret: "our_secret_go_away:)"
   trusted_ca_path: ""
 
 rabbitmq:

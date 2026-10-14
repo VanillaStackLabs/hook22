@@ -37,33 +37,27 @@ type s3StreamWriter struct {
 	nextExpectedOffset int64
 	pendingChunks      map[int64][]byte
 
-	fatalErr           error
+	fatalErr error
 }
 
 func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 
-	// Ensure that NO MATTER HOW we exit, we wake up peers.
-	defer w.spaceCond.Broadcast()
-
-	// If another worker already failed the stream, abort immediately.
 	if w.fatalErr != nil {
+		w.mu.Unlock()
 		return 0, w.fatalErr
 	}
 
 	for len(w.pendingChunks) >= w.maxPendingChunks && off != w.nextExpectedOffset {
 		w.spaceCond.Wait()
-		
-		// When we wake up, we must check if we were woken up because of an error!
 		if w.fatalErr != nil {
+			w.mu.Unlock()
 			return 0, w.fatalErr
 		}
 	}
 
 	chunkCopy := make([]byte, len(p))
 	copy(chunkCopy, p)
-
 	w.pendingChunks[off] = chunkCopy
 
 	for {
@@ -71,20 +65,27 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 		if !exists {
 			break
 		}
-
-		_, err := w.pipeW.Write(chunk)
-		if err != nil {
-			// Save the error before returning so peers know to abort
-			w.fatalErr = err 
-			return 0, err
-		}
-
 		delete(w.pendingChunks, w.nextExpectedOffset)
 		w.nextExpectedOffset += int64(len(chunk))
+
+		// Unlock for parallel chunks
+		w.mu.Unlock()
+		_, err := w.pipeW.Write(chunk)
+		w.mu.Lock()
+
+		if err != nil {
+			w.fatalErr = err
+			w.spaceCond.Broadcast() // Wake up waiting threads so they don't deadlock
+			w.mu.Unlock()
+			return 0, err
+		}
 	}
 
+	w.spaceCond.Broadcast()
+	w.mu.Unlock()
 	return len(p), nil
 }
+
 func (w *s3StreamWriter) Close() error {
 	slog.Info("SFTP handle closed by client", "event", "sftp.close", "filepath", w.filepath, "username", w.username)
 	w.pipeW.Close()
@@ -154,7 +155,7 @@ func (h *gatewayHandler) Filewrite(req *sftp.Request) (io.WriterAt, error) {
 		observability.UploadDuration.Observe(time.Since(startTime).Seconds())
 		if err != nil {
 			pipeR.CloseWithError(err)
-		} else P{
+		} else {
 			observability.UploadBytesTotal.Add(float64(sizeBytes))
 		}
 

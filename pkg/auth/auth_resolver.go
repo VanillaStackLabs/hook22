@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/VanillaStackLabs/hook22/pkg/config"
+	"golang.org/x/crypto/bcrypt"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -101,19 +102,21 @@ func (r *HTTPControlPlaneResolver) sendAuthQuery(payload authRequestPayload) (*U
 // VerifyPasswordAuth returns the auth method ("static_password" or "dynamic_password")
 // and the associated user permissions. It returns an empty string if auth fails.
 func VerifyPasswordAuth(cfg *config.Config, resolver DynamicUserResolver, username, password string) (string, *UserPermissions) {
-	// Static YAML Lookup
 	for _, u := range cfg.Users {
-		if u.Username == username && u.Password == password {
-			return "static_password", nil
+		if u.Username == username {
+			// Compare bcrypt hash instead of plaintext
+			if err := bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password)); err == nil {
+				return "static_password", nil
+			}
 		}
 	}
 
-	// Dynamic Control Plane Fallback
 	if resolver != nil {
 		if perms, ok := resolver.AuthenticatePassword(username, password); ok {
 			return "dynamic_password", perms
 		}
 	}
-
 	return "", nil
 }
+
+
