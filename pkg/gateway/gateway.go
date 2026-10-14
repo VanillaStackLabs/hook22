@@ -87,12 +87,29 @@ func (w *s3StreamWriter) WriteAt(p []byte, off int64) (n int, err error) {
 }
 
 func (w *s3StreamWriter) Close() error {
-	slog.Info("SFTP handle closed by client", "event", "sftp.close", "filepath", w.filepath, "username", w.username)
-	w.pipeW.Close()
+	slog.Info("SFTP handle closed by client", "filepath", w.filepath)
+
+	w.mu.Lock()
+	if len(w.pendingChunks) > 0 {
+		w.fatalErr = fmt.Errorf("stream closed prematurely with %d unwritten chunks", len(w.pendingChunks))
+	}
+	errState := w.fatalErr
+	w.mu.Unlock()
+
+	if errState != nil {
+		w.pipeW.CloseWithError(errState) // Fails the upload if chunks are missing
+	} else {
+		w.pipeW.Close() // Safely completes the upload
+	}
 
 	res := <-w.doneChan
-	if res.err == nil {
+	if res.err == nil && errState == nil {
 		webhook.TriggerWebhook(w.filepath, w.username, res.hash, res.sizeBytes, w.cfg)
+		return nil
+	}
+
+	if errState != nil {
+		return errState
 	}
 	return res.err
 }
